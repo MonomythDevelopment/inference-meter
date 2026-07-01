@@ -2,13 +2,33 @@ import AppKit
 import SwiftUI
 
 @main
+@MainActor
 struct InferenceMeterApp: App {
+    @State private var appState: AppState
+    private let refreshEngine: RefreshEngine
+
+    init() {
+        let appState = AppState()
+        self._appState = State(initialValue: appState)
+
+        self.refreshEngine = RefreshEngine(
+            appState: appState,
+            providers: [
+                MockUsageProvider(provider: .claude),
+                MockUsageProvider(provider: .codex)
+            ]
+        )
+        refreshEngine.start()
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuContentView()
+                .environment(appState)
         } label: {
             Text("✳ --·--  ⬡ --·--")
                 .monospacedDigit()
+                .environment(appState)
         }
         .menuBarExtraStyle(.window)
     }
