@@ -19,3 +19,10 @@ The Xcode project is generated from `project.yml`. Do not commit `InferenceMeter
 make build
 make test
 ```
+
+## Claude Provider Runtime Note
+
+The first live Claude refresh reads the Claude Code OAuth credential from the macOS Keychain. macOS
+may show a one-time permission prompt for `Claude Code-credentials`; choose "Always Allow" to let
+InferenceMeter read future usage snapshots without prompting again. Usage snapshots flow through the
+refresh engine; token, credential, and header values are never printed.
