@@ -1,0 +1,14 @@
+# IDE
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+
+# Xcode / Swift
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+.build/
