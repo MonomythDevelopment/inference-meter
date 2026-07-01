@@ -46,8 +46,7 @@ struct InferenceMeterApp: App {
             MenuContentView()
                 .environment(appState)
         } label: {
-            Text("✳ --·--  ⬡ --·--")
-                .monospacedDigit()
+            MenuBarLabel()
                 .environment(appState)
         }
         .menuBarExtraStyle(.window)
