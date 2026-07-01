@@ -10,6 +10,7 @@ struct InferenceMeterApp: App {
     init() {
         let appState = AppState()
         self._appState = State(initialValue: appState)
+        let codexProvider = CodexProvider()
 
         let providers: [any UsageProvider] = if Self.isRunningTests {
             [
@@ -19,7 +20,7 @@ struct InferenceMeterApp: App {
         } else {
             [
                 ClaudeProvider(),
-                MockUsageProvider(provider: .codex)
+                codexProvider
             ]
         }
 
@@ -33,6 +34,11 @@ struct InferenceMeterApp: App {
         }
 
         refreshEngine.start()
+
+        Task {
+            let usage = await codexProvider.refresh()
+            Self.printTemporaryCodexUsage(usage)
+        }
     }
 
     var body: some Scene {
@@ -45,6 +51,40 @@ struct InferenceMeterApp: App {
                 .environment(appState)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    // Temporary IM-006 launch wiring. RefreshEngine owns scheduled provider refreshes in IM-007.
+    private static func printTemporaryCodexUsage(_ usage: Usage) {
+        let fiveHourPct = usage.fiveHourPct.map { String(format: "%.1f%%", $0) } ?? "unavailable"
+        let weeklyPct = usage.weeklyPct.map { String(format: "%.1f%%", $0) } ?? "unavailable"
+
+        print(
+            "Codex usage: 5h \(fiveHourPct), weekly \(weeklyPct), "
+                + "source \(usageSourceDescription(usage.source)), "
+                + "state \(usageStateDescription(usage.state))"
+        )
+    }
+
+    private static func usageSourceDescription(_ source: UsageSource) -> String {
+        switch source {
+        case .endpoint:
+            return "endpoint"
+        case .localFile:
+            return "localFile"
+        }
+    }
+
+    private static func usageStateDescription(_ state: UsageState) -> String {
+        switch state {
+        case .ok:
+            return "ok"
+        case .stale:
+            return "stale"
+        case .unauthorized:
+            return "unauthorized"
+        case .unavailable:
+            return "unavailable"
+        }
     }
 
     private static var isRunningTests: Bool {

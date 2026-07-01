@@ -1,0 +1,421 @@
+import Foundation
+
+struct CodexEndpointConfiguration: Sendable, Equatable {
+    var url: URL
+    var additionalHeaders: [String: String]
+
+    init(url: URL, additionalHeaders: [String: String] = [:]) {
+        self.url = url
+        self.additionalHeaders = additionalHeaders
+    }
+}
+
+struct CodexProvider: UsageProvider {
+    let provider: Provider = .codex
+
+    private let homeDirectory: URL
+    private let endpointConfiguration: CodexEndpointConfiguration?
+
+    init(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        endpointConfiguration: CodexEndpointConfiguration? = nil
+    ) {
+        self.homeDirectory = homeDirectory
+        self.endpointConfiguration = endpointConfiguration
+    }
+
+    func refresh() async -> Usage {
+        guard endpointConfiguration != nil else {
+            return refreshFromLocalFile()
+        }
+
+        let endpointUsage = await refreshFromEndpoint()
+        guard endpointUsage.state != .ok else {
+            return endpointUsage
+        }
+
+        let localUsage = refreshFromLocalFile()
+        if localUsage.state == .ok {
+            return localUsage
+        }
+
+        return endpointUsage.state == .unauthorized ? endpointUsage : localUsage
+    }
+}
+
+private extension CodexProvider {
+    static let chunkSize = 64 * 1024
+    static let newlineByte: UInt8 = 10
+    static let carriageReturnByte: UInt8 = 13
+    static let rateLimitsNeedle = Data(#""rate_limits""#.utf8)
+
+    var codexDirectory: URL {
+        homeDirectory.appendingPathComponent(".codex", isDirectory: true)
+    }
+
+    var sessionsDirectory: URL {
+        codexDirectory.appendingPathComponent("sessions", isDirectory: true)
+    }
+
+    var authFileURL: URL {
+        codexDirectory.appendingPathComponent("auth.json", isDirectory: false)
+    }
+
+    func refreshFromLocalFile() -> Usage {
+        guard let rolloutURL = try? newestRolloutFile(),
+              let fileModificationDate = modificationDate(for: rolloutURL),
+              let usage = try? lastRateLimitsUsage(
+                in: rolloutURL,
+                fileModificationDate: fileModificationDate
+              ) else {
+            return unavailableUsage(source: .localFile)
+        }
+
+        return usage
+    }
+
+    func newestRolloutFile() throws -> URL? {
+        guard directoryExists(at: sessionsDirectory) else {
+            return nil
+        }
+
+        for yearURL in try sortedDirectories(in: sessionsDirectory, matching: { isDigits($0, count: 4) }) {
+            for monthURL in try sortedDirectories(in: yearURL, matching: { isDigits($0, count: 2) }) {
+                for dayURL in try sortedDirectories(in: monthURL, matching: { isDigits($0, count: 2) }) {
+                    if let rolloutURL = try newestRolloutFile(in: dayURL) {
+                        return rolloutURL
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    func sortedDirectories(in directory: URL, matching predicate: (String) -> Bool) throws -> [URL] {
+        try FileManager.default
+            .contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+            .filter { url in
+                guard predicate(url.lastPathComponent) else {
+                    return false
+                }
+
+                return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            }
+            .sorted { compareSessionPathComponent($0.lastPathComponent, $1.lastPathComponent) }
+    }
+
+    func newestRolloutFile(in dayDirectory: URL) throws -> URL? {
+        let rolloutFiles = try FileManager.default
+            .contentsOfDirectory(
+                at: dayDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+            .filter { url in
+                url.lastPathComponent.hasPrefix("rollout-")
+                    && url.pathExtension == "jsonl"
+                    && ((try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true)
+            }
+
+        return rolloutFiles.max { lhs, rhs in
+            let lhsDate = modificationDate(for: lhs) ?? .distantPast
+            let rhsDate = modificationDate(for: rhs) ?? .distantPast
+            return lhsDate < rhsDate
+        }
+    }
+
+    func lastRateLimitsUsage(in fileURL: URL, fileModificationDate: Date) throws -> Usage? {
+        let fileHandle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? fileHandle.close() }
+
+        var offset = try fileHandle.seekToEnd()
+        var pendingPrefix = Data()
+
+        while offset > 0 {
+            let readSize = min(Self.chunkSize, Int(offset))
+            offset -= UInt64(readSize)
+
+            try fileHandle.seek(toOffset: offset)
+
+            var buffer = try fileHandle.read(upToCount: readSize) ?? Data()
+            buffer.append(pendingPrefix)
+
+            guard let firstNewlineIndex = buffer.firstIndex(of: Self.newlineByte) else {
+                pendingPrefix = buffer
+                continue
+            }
+
+            let completeStart = offset == 0
+                ? buffer.startIndex
+                : buffer.index(after: firstNewlineIndex)
+            let completeData = buffer[completeStart..<buffer.endIndex]
+
+            if let usage = lastRateLimitsUsage(
+                inCompleteLines: completeData,
+                fileModificationDate: fileModificationDate
+            ) {
+                return usage
+            }
+
+            pendingPrefix = offset == 0
+                ? Data()
+                : Data(buffer[buffer.startIndex..<firstNewlineIndex])
+        }
+
+        guard !pendingPrefix.isEmpty else {
+            return nil
+        }
+
+        return usage(fromCandidateLine: pendingPrefix, fileModificationDate: fileModificationDate)
+    }
+
+    func lastRateLimitsUsage(
+        inCompleteLines linesData: Data.SubSequence,
+        fileModificationDate: Date
+    ) -> Usage? {
+        for line in linesData.split(separator: Self.newlineByte, omittingEmptySubsequences: true).reversed() {
+            if let usage = usage(fromCandidateLine: Data(line), fileModificationDate: fileModificationDate) {
+                return usage
+            }
+        }
+
+        return nil
+    }
+
+    func usage(fromCandidateLine lineData: Data, fileModificationDate: Date) -> Usage? {
+        let trimmedLineData = trimLineEnding(from: lineData)
+
+        guard trimmedLineData.range(of: Self.rateLimitsNeedle) != nil else {
+            return nil
+        }
+
+        let updatedAt = eventTimestamp(from: trimmedLineData) ?? fileModificationDate
+        let usage = UsageNormalizer.codexRateLimits(
+            from: trimmedLineData,
+            source: .localFile,
+            parsedAt: updatedAt
+        )
+
+        return usage.state == .unavailable ? nil : usage
+    }
+
+    func refreshFromEndpoint() async -> Usage {
+        guard let endpointConfiguration else {
+            return unavailableUsage(source: .endpoint)
+        }
+
+        guard let accessToken = try? readAuthAccessToken() else {
+            return unauthorizedUsage(source: .endpoint)
+        }
+
+        let firstAttempt = await requestEndpoint(
+            endpointConfiguration,
+            accessToken: accessToken
+        )
+
+        guard firstAttempt.state == .unauthorized,
+              let retryAccessToken = try? readAuthAccessToken() else {
+            return firstAttempt
+        }
+
+        return await requestEndpoint(
+            endpointConfiguration,
+            accessToken: retryAccessToken
+        )
+    }
+
+    func requestEndpoint(
+        _ configuration: CodexEndpointConfiguration,
+        accessToken: String
+    ) async -> Usage {
+        var request = URLRequest(url: configuration.url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        for (field, value) in configuration.additionalHeaders {
+            guard field.caseInsensitiveCompare("Authorization") != .orderedSame else {
+                continue
+            }
+
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return unavailableUsage(source: .endpoint)
+            }
+
+            if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                return unauthorizedUsage(source: .endpoint)
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                return unavailableUsage(source: .endpoint)
+            }
+
+            let usage = UsageNormalizer.codexRateLimits(
+                from: data,
+                source: .endpoint,
+                parsedAt: Date()
+            )
+
+            return usage.state == .unavailable ? unavailableUsage(source: .endpoint) : usage
+        } catch {
+            return unavailableUsage(source: .endpoint)
+        }
+    }
+
+    func readAuthAccessToken() throws -> String? {
+        let data = try Data(contentsOf: authFileURL)
+        let authFile = try JSONDecoder().decode(CodexAuthFile.self, from: data)
+        return authFile.tokens?.accessToken?.nonEmpty
+    }
+
+    func directoryExists(at url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+    }
+
+    func modificationDate(for url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
+    func compareSessionPathComponent(_ lhs: String, _ rhs: String) -> Bool {
+        if let lhsNumber = Int(lhs),
+           let rhsNumber = Int(rhs),
+           lhsNumber != rhsNumber {
+            return lhsNumber > rhsNumber
+        }
+
+        return lhs > rhs
+    }
+
+    func isDigits(_ value: String, count: Int) -> Bool {
+        value.count == count && value.allSatisfy(\.isNumber)
+    }
+
+    func trimLineEnding(from data: Data) -> Data {
+        var trimmed = data
+
+        while trimmed.last == Self.newlineByte || trimmed.last == Self.carriageReturnByte {
+            trimmed.removeLast()
+        }
+
+        return trimmed
+    }
+
+    func eventTimestamp(from data: Data) -> Date? {
+        try? JSONDecoder().decode(CodexEventTimestamp.self, from: data).timestamp
+    }
+
+    func unavailableUsage(source: UsageSource) -> Usage {
+        Usage(
+            provider: .codex,
+            fiveHourPct: nil,
+            weeklyPct: nil,
+            fiveHourResetsAt: nil,
+            weeklyResetsAt: nil,
+            updatedAt: nil,
+            source: source,
+            state: .unavailable
+        )
+    }
+
+    func unauthorizedUsage(source: UsageSource) -> Usage {
+        Usage(
+            provider: .codex,
+            fiveHourPct: nil,
+            weeklyPct: nil,
+            fiveHourResetsAt: nil,
+            weeklyResetsAt: nil,
+            updatedAt: nil,
+            source: source,
+            state: .unauthorized
+        )
+    }
+}
+
+private struct CodexAuthFile: Decodable, Sendable {
+    var tokens: CodexAuthTokens?
+}
+
+private struct CodexAuthTokens: Decodable, Sendable {
+    var accessToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+    }
+}
+
+private struct CodexEventTimestamp: Decodable, Sendable {
+    var timestamp: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case ts
+        case time
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        timestamp = container.decodeFlexibleDateIfPresent(forKey: .timestamp)
+            ?? container.decodeFlexibleDateIfPresent(forKey: .ts)
+            ?? container.decodeFlexibleDateIfPresent(forKey: .time)
+            ?? container.decodeFlexibleDateIfPresent(forKey: .createdAt)
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeFlexibleDateIfPresent(forKey key: Key) -> Date? {
+        guard contains(key), (try? decodeNil(forKey: key)) != true else {
+            return nil
+        }
+
+        if let seconds = try? decode(Double.self, forKey: key) {
+            return Date(timeIntervalSince1970: seconds)
+        }
+
+        if let seconds = try? decode(Int.self, forKey: key) {
+            return Date(timeIntervalSince1970: Double(seconds))
+        }
+
+        guard let value = try? decode(String.self, forKey: key) else {
+            return nil
+        }
+
+        if let seconds = Double(value) {
+            return Date(timeIntervalSince1970: seconds)
+        }
+
+        return parseISO8601Date(value)
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
+private func parseISO8601Date(_ value: String) -> Date? {
+    let fractionalFormatter = ISO8601DateFormatter()
+    fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+    if let date = fractionalFormatter.date(from: value) {
+        return date
+    }
+
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+
+    return formatter.date(from: value)
+}
