@@ -8,6 +8,7 @@
 # Xcode / Swift
 build/
 DerivedData/
+*.xcodeproj
 *.xcuserstate
 xcuserdata/
 .swiftpm/
