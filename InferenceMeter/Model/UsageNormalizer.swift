@@ -110,6 +110,11 @@ private extension UsageNormalizer {
             return rateLimits
         }
 
+        if let searchResult = try? decoder.decode(CodexRateLimitsSearchDTO.self, from: data),
+           let rateLimits = searchResult.rateLimits {
+            return rateLimits
+        }
+
         guard let jsonLines = String(data: data, encoding: .utf8) else {
             return nil
         }
@@ -128,6 +133,11 @@ private extension UsageNormalizer {
 
             if let rateLimits = try? decoder.decode(CodexRateLimitsDTO.self, from: lineData),
                rateLimits.hasWindow {
+                return rateLimits
+            }
+
+            if let searchResult = try? decoder.decode(CodexRateLimitsSearchDTO.self, from: lineData),
+               let rateLimits = searchResult.rateLimits {
                 return rateLimits
             }
         }
@@ -239,6 +249,43 @@ private struct CodexRateLimitsDTO: Codable, Sendable {
     }
 }
 
+private struct CodexRateLimitsSearchDTO: Decodable, Sendable {
+    var rateLimits: CodexRateLimitsDTO?
+
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: DynamicCodingKey.self) {
+            let rateLimitsKey = DynamicCodingKey(stringValue: "rate_limits")
+
+            if let rateLimitsKey,
+               let rateLimits = try? container.decode(CodexRateLimitsDTO.self, forKey: rateLimitsKey),
+               rateLimits.hasWindow {
+                self.rateLimits = rateLimits
+                return
+            }
+
+            for key in container.allKeys {
+                if let nested = try? container.decode(CodexRateLimitsSearchDTO.self, forKey: key),
+                   let rateLimits = nested.rateLimits {
+                    self.rateLimits = rateLimits
+                    return
+                }
+            }
+        }
+
+        if var container = try? decoder.unkeyedContainer() {
+            while !container.isAtEnd {
+                if let nested = try? container.decode(CodexRateLimitsSearchDTO.self),
+                   let rateLimits = nested.rateLimits {
+                    self.rateLimits = rateLimits
+                    return
+                }
+            }
+        }
+
+        rateLimits = nil
+    }
+}
+
 private struct CodexRateLimitWindowDTO: Codable, Sendable {
     var usedPercent: Double?
     var windowMinutes: Int?
@@ -256,6 +303,21 @@ private struct CodexRateLimitWindowDTO: Codable, Sendable {
         usedPercent = container.decodeLossyDoubleIfPresent(forKey: .usedPercent)
         windowMinutes = container.decodeLossyIntIfPresent(forKey: .windowMinutes)
         resetsAt = container.decodeFlexibleDateIfPresent(forKey: .resetsAt)
+    }
+}
+
+private struct DynamicCodingKey: CodingKey, Sendable {
+    var stringValue: String
+    var intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        stringValue = String(intValue)
+        self.intValue = intValue
     }
 }
 
