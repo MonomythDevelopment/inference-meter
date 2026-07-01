@@ -1,0 +1,60 @@
+name: InferenceMeter
+
+options:
+  bundleIdPrefix: dev.monomyth
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_HARDENED_RUNTIME: NO
+
+targets:
+  InferenceMeter:
+    type: application
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: InferenceMeter
+        excludes:
+          - "**/.gitkeep"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.monomyth.InferenceMeter
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+
+  InferenceMeterTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: InferenceMeterTests
+        excludes:
+          - "**/.gitkeep"
+    dependencies:
+      - target: InferenceMeter
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.monomyth.InferenceMeterTests
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+
+schemes:
+  InferenceMeter:
+    build:
+      targets:
+        InferenceMeter: all
+    test:
+      gatherCoverageData: false
+      targets:
+        - InferenceMeterTests
