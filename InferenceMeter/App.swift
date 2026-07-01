@@ -11,13 +11,27 @@ struct InferenceMeterApp: App {
         let appState = AppState()
         self._appState = State(initialValue: appState)
 
-        self.refreshEngine = RefreshEngine(
-            appState: appState,
-            providers: [
+        let providers: [any UsageProvider] = if Self.isRunningTests {
+            [
                 MockUsageProvider(provider: .claude),
                 MockUsageProvider(provider: .codex)
             ]
+        } else {
+            [
+                ClaudeProvider(),
+                MockUsageProvider(provider: .codex)
+            ]
+        }
+
+        self.refreshEngine = RefreshEngine(
+            appState: appState,
+            providers: providers
         )
+
+        guard !Self.isRunningTests else {
+            return
+        }
+
         refreshEngine.start()
     }
 
@@ -31,6 +45,10 @@ struct InferenceMeterApp: App {
                 .environment(appState)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 }
 
