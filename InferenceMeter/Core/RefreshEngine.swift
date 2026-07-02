@@ -481,7 +481,6 @@ struct MockUsageProvider: UsageProvider {
     let provider: Provider
 
     func refresh() async -> Usage {
-        // Swap this provider for the real Claude/Codex providers when IM-005 and IM-006 land.
         .unavailable(provider: provider)
     }
 }
