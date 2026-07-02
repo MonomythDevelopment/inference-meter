@@ -79,6 +79,9 @@ struct DetailPopover: View {
             }
             .padding(14)
             .frame(width: 320, alignment: .leading)
+            .task(id: timeline.date) {
+                refreshLaunchAtLoginStatus()
+            }
         }
         .onAppear(perform: refreshLaunchAtLoginStatus)
     }
