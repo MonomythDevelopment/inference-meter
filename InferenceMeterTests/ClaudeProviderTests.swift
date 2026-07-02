@@ -40,6 +40,60 @@ func claudeProviderReturnsEndpointUsage() async throws {
     #expect(usage.updatedAt == parsedAt)
 }
 
+@Test("ClaudeProvider keeps weekly endpoint usage when five_hour is absent")
+func claudeProviderKeepsWeeklyEndpointUsageWhenFiveHourIsAbsent() async throws {
+    let parsedAt = Date(timeIntervalSince1970: 1_800_001_025)
+    let usageURL = makeEndpointURL()
+    let provider = ClaudeProvider(
+        keychain: keychainReturningCredential(),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        session: makeStubbedSession(for: usageURL) { _ in
+            HTTPStubResponse(
+                data: try fixtureData(named: "claude-usage-absent-five-hour.json"),
+                statusCode: 200
+            )
+        },
+        now: { parsedAt }
+    )
+
+    let usage = await provider.refresh()
+
+    #expect(usage.state == .ok)
+    #expect(usage.source == .endpoint)
+    #expect(usage.fiveHourPct == nil)
+    #expect(isClose(usage.weeklyPct, to: 41))
+    #expect(usage.updatedAt == parsedAt)
+}
+
+@Test("ClaudeProvider treats endpoint usage with both windows absent as unavailable")
+func claudeProviderTreatsEndpointUsageWithBothWindowsAbsentAsUnavailable() async throws {
+    let parsedAt = Date(timeIntervalSince1970: 1_800_001_050)
+    let usageURL = makeEndpointURL()
+    let provider = ClaudeProvider(
+        keychain: keychainReturningCredential(),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        session: makeStubbedSession(for: usageURL) { _ in
+            HTTPStubResponse(
+                data: try fixtureData(named: "claude-usage-absent-both.json"),
+                statusCode: 200
+            )
+        },
+        now: { parsedAt }
+    )
+
+    let usage = await provider.refresh()
+
+    #expect(usage.state == .unavailable)
+    #expect(usage.source == .endpoint)
+    #expect(usage.fiveHourPct == nil)
+    #expect(usage.weeklyPct == nil)
+    #expect(usage.updatedAt == parsedAt)
+}
+
 @Test("ClaudeProvider maps 401 and 403 responses to unauthorized")
 func claudeProviderMapsAuthFailuresToUnauthorized() async {
     for statusCode in [401, 403] {
@@ -90,6 +144,55 @@ func claudeProviderMapsMissingKeychainCredentialToUnauthorized() async {
     #expect(usage.state == .unauthorized)
     #expect(usage.source == .endpoint)
     #expect(usage.updatedAt == parsedAt)
+}
+
+@Test("ClaudeProvider does not emit credential sentinels during refresh and reauthenticate")
+func claudeProviderDoesNotEmitCredentialSentinelsDuringRefreshAndReauthenticate() async throws {
+    let usageURL = makeEndpointURL()
+    let tokenURL = makeTokenURL()
+    let tokenRequests = RequestLog()
+    let accessToken = "claude-access-sentinel-7DF4960B"
+    let refreshToken = "claude-refresh-sentinel-45F71DA6"
+    let clientID = "claude-client-sentinel-D7C4AB73"
+    let scope = "claude-scope-sentinel-61F3D5C3"
+    let tokenResponseSentinel = "claude-token-response-sentinel-0C75D1F2"
+    let session = makeStubbedSession(for: usageURL) { _ in
+        HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+    }
+    StubURLProtocol.register(url: tokenURL) { request in
+        await tokenRequests.append(request)
+        return HTTPStubResponse(
+            data: Data(#"{"access_token":"\#(tokenResponseSentinel)"}"#.utf8),
+            statusCode: 200
+        )
+    }
+    let provider = ClaudeProvider(
+        keychain: keychainReturningCredential(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            clientID: clientID,
+            scopes: [scope]
+        ),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        session: session
+    )
+    var firstUsage: Usage?
+    var retryUsage: Usage?
+
+    let output = try await captureStandardOutput {
+        firstUsage = await provider.refresh()
+        await provider.reauthenticate()
+        retryUsage = await provider.refresh()
+    }
+
+    #expect(await tokenRequests.requests.isEmpty)
+    expectNoSecretLeaks(
+        output: output,
+        usages: [try #require(firstUsage), try #require(retryUsage)],
+        sentinels: [accessToken, refreshToken, clientID, scope, tokenResponseSentinel]
+    )
 }
 
 @Test("ClaudeProvider maps malformed credentials to unauthorized")
