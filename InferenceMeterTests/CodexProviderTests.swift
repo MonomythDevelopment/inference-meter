@@ -171,8 +171,8 @@ func codexProviderReadsLargeRolloutTail() async throws {
     }
 }
 
-@Test("CodexProvider adopts Codex-rotated auth.json token before network refresh")
-func codexProviderAdoptsRotatedAuthFileTokenBeforeNetworkRefresh() async throws {
+@Test("CodexProvider adopts Codex-rotated auth.json token without network refresh")
+func codexProviderAdoptsRotatedAuthFileTokenWithoutNetworkRefresh() async throws {
     try await withTemporaryHome { home in
         let endpointURL = makeCodexEndpointURL()
         let tokenURL = makeCodexTokenURL()
@@ -204,8 +204,7 @@ func codexProviderAdoptsRotatedAuthFileTokenBeforeNetworkRefresh() async throws 
             homeDirectory: home,
             endpointConfiguration: CodexEndpointConfiguration(url: endpointURL),
             session: session,
-            authFileReader: FileReader { _ in try authSequence.nextData() },
-            authRefreshURL: tokenURL
+            authFileReader: FileReader { _ in try authSequence.nextData() }
         )
 
         let firstUsage = await provider.refresh()
@@ -220,70 +219,8 @@ func codexProviderAdoptsRotatedAuthFileTokenBeforeNetworkRefresh() async throws 
     }
 }
 
-@Test("CodexProvider refreshes token into memory without writing auth.json")
-func codexProviderNetworkRefreshCachesTokenWithoutWritingAuthFile() async throws {
-    try await withTemporaryHome { home in
-        let authFileURL = try writeAuthFile(
-            home: home,
-            accessToken: "expired-access-token",
-            refreshToken: "refresh-token",
-            lastRefresh: "2026-07-01T00:00:00Z"
-        )
-        let originalAuthData = try Data(contentsOf: authFileURL)
-        let endpointURL = makeCodexEndpointURL()
-        let tokenURL = makeCodexTokenURL()
-        let endpointRequests = CodexRequestLog()
-        let tokenRequests = CodexRequestLog()
-        let session = makeCodexStubbedSession(for: endpointURL) { request in
-            await endpointRequests.append(request)
-
-            if request.value(forHTTPHeaderField: "Authorization") == "Bearer refreshed-access-token" {
-                return CodexHTTPStubResponse(data: Data(rateLimitsLine(fiveHourPct: 24, weeklyPct: 36).utf8), statusCode: 200)
-            }
-
-            return CodexHTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
-        }
-        CodexStubURLProtocol.register(url: tokenURL) { request in
-            await tokenRequests.append(request)
-            return CodexHTTPStubResponse(
-                data: Data(#"{"access_token":"refreshed-access-token","refresh_token":"next-refresh-token"}"#.utf8),
-                statusCode: 200
-            )
-        }
-        let provider = CodexProvider(
-            homeDirectory: home,
-            endpointConfiguration: CodexEndpointConfiguration(url: endpointURL),
-            session: session,
-            authRefreshURL: tokenURL,
-            oauthClientID: "unit-test-client"
-        )
-
-        let firstUsage = await provider.refresh()
-        await provider.reauthenticate()
-        let retryUsage = await provider.refresh()
-        let tokenRequest = await tokenRequests.requests.first
-        let tokenBodies = await tokenRequests.bodies
-        let tokenBody = try #require(tokenBodies.first ?? nil)
-        let tokenJSON = try #require(JSONSerialization.jsonObject(with: tokenBody) as? [String: String])
-        let currentAuthData = try Data(contentsOf: authFileURL)
-
-        #expect(firstUsage.state == .unauthorized)
-        #expect(retryUsage.state == .ok)
-        #expect(isClose(retryUsage.fiveHourPct, to: 24))
-        #expect(await endpointRequests.requests.count == 2)
-        #expect(await tokenRequests.requests.count == 1)
-        #expect(tokenRequest?.url == tokenURL)
-        #expect(tokenRequest?.httpMethod == "POST")
-        #expect(tokenRequest?.value(forHTTPHeaderField: "Content-Type") == "application/json")
-        #expect(tokenJSON["client_id"] == "unit-test-client")
-        #expect(tokenJSON["grant_type"] == "refresh_token")
-        #expect(tokenJSON["refresh_token"] == "refresh-token")
-        #expect(currentAuthData == originalAuthData)
-    }
-}
-
-@Test("CodexProvider keeps retry unauthorized when refresh-token exchange fails")
-func codexProviderRefreshFailureLeavesRetryUnauthorized() async throws {
+@Test("CodexProvider reauthentication never calls the auth-refresh endpoint when auth.json is unchanged")
+func codexProviderReauthenticationDoesNotRefreshUnchangedAuthFile() async throws {
     try await withTemporaryHome { home in
         try writeAuthFile(
             home: home,
@@ -293,17 +230,23 @@ func codexProviderRefreshFailureLeavesRetryUnauthorized() async throws {
         )
         let endpointURL = makeCodexEndpointURL()
         let tokenURL = makeCodexTokenURL()
-        let session = makeCodexStubbedSession(for: endpointURL) { _ in
-            CodexHTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+        let endpointRequests = CodexRequestLog()
+        let tokenRequests = CodexRequestLog()
+        let session = makeCodexStubbedSession(for: endpointURL) { request in
+            await endpointRequests.append(request)
+            return CodexHTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
         }
-        CodexStubURLProtocol.register(url: tokenURL) { _ in
-            CodexHTTPStubResponse(data: Data(#"{"error":"invalid_grant"}"#.utf8), statusCode: 400)
+        CodexStubURLProtocol.register(url: tokenURL) { request in
+            await tokenRequests.append(request)
+            return CodexHTTPStubResponse(
+                data: Data(#"{"access_token":"should-not-be-used"}"#.utf8),
+                statusCode: 200
+            )
         }
         let provider = CodexProvider(
             homeDirectory: home,
             endpointConfiguration: CodexEndpointConfiguration(url: endpointURL),
-            session: session,
-            authRefreshURL: tokenURL
+            session: session
         )
 
         let firstUsage = await provider.refresh()
@@ -312,13 +255,15 @@ func codexProviderRefreshFailureLeavesRetryUnauthorized() async throws {
 
         #expect(firstUsage.state == .unauthorized)
         #expect(retryUsage.state == .unauthorized)
+        #expect(await endpointRequests.requests.count == 2)
+        #expect(await tokenRequests.requests.isEmpty)
     }
 }
 
-@Test("CodexProvider lets auth.json rotation supersede in-memory token")
-func codexProviderAuthFileRotationSupersedesInMemoryToken() async throws {
+@Test("CodexProvider retry stays unauthorized when auth.json is unchanged")
+func codexProviderUnchangedAuthFileLeavesRetryUnauthorized() async throws {
     try await withTemporaryHome { home in
-        let authFileURL = try writeAuthFile(
+        try writeAuthFile(
             home: home,
             accessToken: "expired-access-token",
             refreshToken: "refresh-token",
@@ -326,104 +271,27 @@ func codexProviderAuthFileRotationSupersedesInMemoryToken() async throws {
         )
         let endpointURL = makeCodexEndpointURL()
         let tokenURL = makeCodexTokenURL()
-        let endpointRequests = CodexRequestLog()
-        let session = makeCodexStubbedSession(for: endpointURL) { request in
-            await endpointRequests.append(request)
-
-            switch request.value(forHTTPHeaderField: "Authorization") {
-            case "Bearer refreshed-access-token", "Bearer rotated-access-token":
-                return CodexHTTPStubResponse(data: Data(rateLimitsLine(fiveHourPct: 42, weeklyPct: 51).utf8), statusCode: 200)
-            default:
-                return CodexHTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
-            }
-        }
-        CodexStubURLProtocol.register(url: tokenURL) { _ in
-            CodexHTTPStubResponse(data: Data(#"{"access_token":"refreshed-access-token"}"#.utf8), statusCode: 200)
-        }
-        let provider = CodexProvider(
-            homeDirectory: home,
-            endpointConfiguration: CodexEndpointConfiguration(url: endpointURL),
-            session: session,
-            authRefreshURL: tokenURL
-        )
-
-        _ = await provider.refresh()
-        await provider.reauthenticate()
-        let memoryUsage = await provider.refresh()
-        try codexAuthData(
-            accessToken: "rotated-access-token",
-            refreshToken: "refresh-token",
-            lastRefresh: "2026-07-01T00:10:00Z"
-        ).write(to: authFileURL, options: .atomic)
-        let rotatedUsage = await provider.refresh()
-        let authorizationHeaders = await endpointRequests.requests.map {
-            $0.value(forHTTPHeaderField: "Authorization")
-        }
-
-        #expect(memoryUsage.state == .ok)
-        #expect(rotatedUsage.state == .ok)
-        #expect(authorizationHeaders == [
-            "Bearer expired-access-token",
-            "Bearer refreshed-access-token",
-            "Bearer rotated-access-token"
-        ])
-    }
-}
-
-@Test("CodexProvider treats refresh-token auth.json rotations as owner changes")
-func codexProviderRefreshTokenRotationClearsInMemoryToken() async throws {
-    try await withTemporaryHome { home in
-        let authFileURL = try writeAuthFile(
-            home: home,
-            accessToken: "expired-access-token",
-            refreshToken: "old-refresh-token",
-            lastRefresh: "2026-07-01T00:00:00Z"
-        )
-        let endpointURL = makeCodexEndpointURL()
-        let tokenURL = makeCodexTokenURL()
-        let endpointRequests = CodexRequestLog()
         let tokenRequests = CodexRequestLog()
-        let session = makeCodexStubbedSession(for: endpointURL) { request in
-            await endpointRequests.append(request)
-
-            if request.value(forHTTPHeaderField: "Authorization") == "Bearer refreshed-access-token" {
-                return CodexHTTPStubResponse(data: Data(rateLimitsLine(fiveHourPct: 42, weeklyPct: 51).utf8), statusCode: 200)
-            }
-
-            return CodexHTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+        let session = makeCodexStubbedSession(for: endpointURL) { _ in
+            CodexHTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
         }
         CodexStubURLProtocol.register(url: tokenURL) { request in
             await tokenRequests.append(request)
-            return CodexHTTPStubResponse(data: Data(#"{"access_token":"refreshed-access-token"}"#.utf8), statusCode: 200)
+            return CodexHTTPStubResponse(data: Data(#"{"access_token":"should-not-be-used"}"#.utf8), statusCode: 200)
         }
         let provider = CodexProvider(
             homeDirectory: home,
             endpointConfiguration: CodexEndpointConfiguration(url: endpointURL),
-            session: session,
-            authRefreshURL: tokenURL
+            session: session
         )
 
-        _ = await provider.refresh()
+        let firstUsage = await provider.refresh()
         await provider.reauthenticate()
-        let memoryUsage = await provider.refresh()
-        try codexAuthData(
-            accessToken: "expired-access-token",
-            refreshToken: "rotated-refresh-token",
-            lastRefresh: "2026-07-01T00:00:00Z"
-        ).write(to: authFileURL, options: .atomic)
-        let ownerRotationUsage = await provider.refresh()
-        let authorizationHeaders = await endpointRequests.requests.map {
-            $0.value(forHTTPHeaderField: "Authorization")
-        }
+        let retryUsage = await provider.refresh()
 
-        #expect(memoryUsage.state == .ok)
-        #expect(ownerRotationUsage.state == .unauthorized)
-        #expect(await tokenRequests.requests.count == 1)
-        #expect(authorizationHeaders == [
-            "Bearer expired-access-token",
-            "Bearer refreshed-access-token",
-            "Bearer expired-access-token"
-        ])
+        #expect(firstUsage.state == .unauthorized)
+        #expect(retryUsage.state == .unauthorized)
+        #expect(await tokenRequests.requests.isEmpty)
     }
 }
 
