@@ -190,68 +190,44 @@ func claudeProviderStatusLineParserReadsUsedPercentageFixture() throws {
     #expect(usage.updatedAt == parsedAt)
 }
 
-@Test("ClaudeProvider refreshes an expired token into memory and retry succeeds")
-func claudeProviderRefreshesExpiredTokenIntoMemory() async throws {
+@Test("ClaudeProvider reauthentication never calls the token endpoint when credential is unchanged")
+func claudeProviderReauthenticationDoesNotRefreshUnchangedCredential() async throws {
     let usageURL = makeEndpointURL()
     let tokenURL = makeTokenURL()
     let usageRequests = RequestLog()
     let tokenRequests = RequestLog()
     let session = makeStubbedSession(for: usageURL) { request in
         await usageRequests.append(request)
-
-        if request.value(forHTTPHeaderField: "Authorization") == "Bearer refreshed-access-token" {
-            return HTTPStubResponse(
-                data: try fixtureData(named: "claude-usage-response.json"),
-                statusCode: 200
-            )
-        }
-
         return HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
     }
     StubURLProtocol.register(url: tokenURL) { request in
         await tokenRequests.append(request)
-        return HTTPStubResponse(
-            data: Data(#"{"access_token":"refreshed-access-token","refresh_token":"next-refresh-token","expires_in":3600}"#.utf8),
-            statusCode: 200
-        )
+        return HTTPStubResponse(data: Data(#"{"access_token":"should-not-be-used"}"#.utf8), statusCode: 200)
     }
     let provider = ClaudeProvider(
         keychain: keychainReturningCredential(
             accessToken: "expired-access-token",
             refreshToken: "refresh-token",
-            clientID: "unit-test-client",
-            scopes: ["user:inference"]
+            clientID: "unit-test-client"
         ),
         credentialService: "unit-test-service",
         credentialAccount: "unit-test-account",
         usageURL: usageURL,
-        tokenURL: tokenURL,
         session: session
     )
 
     let firstUsage = await provider.refresh()
     await provider.reauthenticate()
     let retryUsage = await provider.refresh()
-    let tokenRequest = await tokenRequests.requests.first
-    let tokenBodies = await tokenRequests.bodies
-    let tokenBody = try #require(tokenBodies.first ?? nil)
-    let tokenJSON = try #require(JSONSerialization.jsonObject(with: tokenBody) as? [String: String])
 
     #expect(firstUsage.state == .unauthorized)
-    #expect(retryUsage.state == .ok)
+    #expect(retryUsage.state == .unauthorized)
     #expect(await usageRequests.requests.count == 2)
-    #expect(await tokenRequests.requests.count == 1)
-    #expect(tokenRequest?.url == tokenURL)
-    #expect(tokenRequest?.httpMethod == "POST")
-    #expect(tokenRequest?.value(forHTTPHeaderField: "Content-Type") == "application/json")
-    #expect(tokenJSON["grant_type"] == "refresh_token")
-    #expect(tokenJSON["client_id"] == "unit-test-client")
-    #expect(tokenJSON["refresh_token"] == "refresh-token")
-    #expect(tokenJSON["scope"] == "user:inference")
+    #expect(await tokenRequests.requests.isEmpty)
 }
 
-@Test("ClaudeProvider adopts a rotated Keychain token before network refresh")
-func claudeProviderAdoptsRotatedKeychainTokenBeforeNetworkRefresh() async throws {
+@Test("ClaudeProvider adopts a rotated Keychain token without network refresh")
+func claudeProviderAdoptsRotatedKeychainTokenWithoutNetworkRefresh() async throws {
     let usageURL = makeEndpointURL()
     let tokenURL = makeTokenURL()
     let tokenRequests = RequestLog()
@@ -278,7 +254,6 @@ func claudeProviderAdoptsRotatedKeychainTokenBeforeNetworkRefresh() async throws
         credentialService: "unit-test-service",
         credentialAccount: "unit-test-account",
         usageURL: usageURL,
-        tokenURL: tokenURL,
         session: session
     )
 
@@ -292,15 +267,17 @@ func claudeProviderAdoptsRotatedKeychainTokenBeforeNetworkRefresh() async throws
     #expect(await tokenRequests.requests.isEmpty)
 }
 
-@Test("ClaudeProvider keeps prior token state when refresh-token exchange fails")
-func claudeProviderRefreshFailureLeavesRetryUnauthorized() async throws {
+@Test("ClaudeProvider retry stays unauthorized when credential is unchanged")
+func claudeProviderUnchangedCredentialLeavesRetryUnauthorized() async throws {
     let usageURL = makeEndpointURL()
     let tokenURL = makeTokenURL()
+    let tokenRequests = RequestLog()
     let session = makeStubbedSession(for: usageURL) { _ in
         HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
     }
-    StubURLProtocol.register(url: tokenURL) { _ in
-        HTTPStubResponse(data: Data(#"{"error":"invalid_grant"}"#.utf8), statusCode: 400)
+    StubURLProtocol.register(url: tokenURL) { request in
+        await tokenRequests.append(request)
+        return HTTPStubResponse(data: Data(#"{"access_token":"should-not-be-used"}"#.utf8), statusCode: 200)
     }
     let provider = ClaudeProvider(
         keychain: keychainReturningCredential(
@@ -310,7 +287,6 @@ func claudeProviderRefreshFailureLeavesRetryUnauthorized() async throws {
         credentialService: "unit-test-service",
         credentialAccount: "unit-test-account",
         usageURL: usageURL,
-        tokenURL: tokenURL,
         session: session
     )
 
@@ -320,120 +296,7 @@ func claudeProviderRefreshFailureLeavesRetryUnauthorized() async throws {
 
     #expect(firstUsage.state == .unauthorized)
     #expect(retryUsage.state == .unauthorized)
-}
-
-@Test("ClaudeProvider lets a later Keychain rotation supersede in-memory token")
-func claudeProviderKeychainRotationSupersedesInMemoryToken() async throws {
-    let usageURL = makeEndpointURL()
-    let tokenURL = makeTokenURL()
-    let usageRequests = RequestLog()
-    let keychainSequence = CredentialSequence([
-        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "refresh-token"),
-        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "refresh-token"),
-        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "refresh-token"),
-        try claudeCredentialData(accessToken: "rotated-access-token", refreshToken: "refresh-token")
-    ])
-    let session = makeStubbedSession(for: usageURL) { request in
-        await usageRequests.append(request)
-
-        switch request.value(forHTTPHeaderField: "Authorization") {
-        case "Bearer refreshed-access-token", "Bearer rotated-access-token":
-            return HTTPStubResponse(
-                data: try fixtureData(named: "claude-usage-response.json"),
-                statusCode: 200
-            )
-        default:
-            return HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
-        }
-    }
-    StubURLProtocol.register(url: tokenURL) { _ in
-        HTTPStubResponse(
-            data: Data(#"{"access_token":"refreshed-access-token","expires_in":3600}"#.utf8),
-            statusCode: 200
-        )
-    }
-    let provider = ClaudeProvider(
-        keychain: keychainSequence.keychain(),
-        credentialService: "unit-test-service",
-        credentialAccount: "unit-test-account",
-        usageURL: usageURL,
-        tokenURL: tokenURL,
-        session: session
-    )
-
-    _ = await provider.refresh()
-    await provider.reauthenticate()
-    let memoryUsage = await provider.refresh()
-    let rotatedUsage = await provider.refresh()
-    let authorizationHeaders = await usageRequests.requests.map {
-        $0.value(forHTTPHeaderField: "Authorization")
-    }
-
-    #expect(memoryUsage.state == .ok)
-    #expect(rotatedUsage.state == .ok)
-    #expect(authorizationHeaders == [
-        "Bearer expired-access-token",
-        "Bearer refreshed-access-token",
-        "Bearer rotated-access-token"
-    ])
-}
-
-@Test("ClaudeProvider treats refresh-token Keychain rotations as owner changes")
-func claudeProviderRefreshTokenRotationClearsInMemoryToken() async throws {
-    let usageURL = makeEndpointURL()
-    let tokenURL = makeTokenURL()
-    let usageRequests = RequestLog()
-    let tokenRequests = RequestLog()
-    let keychainSequence = CredentialSequence([
-        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "old-refresh-token"),
-        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "old-refresh-token"),
-        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "old-refresh-token"),
-        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "rotated-refresh-token")
-    ])
-    let session = makeStubbedSession(for: usageURL) { request in
-        await usageRequests.append(request)
-
-        if request.value(forHTTPHeaderField: "Authorization") == "Bearer refreshed-access-token" {
-            return HTTPStubResponse(
-                data: try fixtureData(named: "claude-usage-response.json"),
-                statusCode: 200
-            )
-        }
-
-        return HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
-    }
-    StubURLProtocol.register(url: tokenURL) { request in
-        await tokenRequests.append(request)
-        return HTTPStubResponse(
-            data: Data(#"{"access_token":"refreshed-access-token","expires_in":3600}"#.utf8),
-            statusCode: 200
-        )
-    }
-    let provider = ClaudeProvider(
-        keychain: keychainSequence.keychain(),
-        credentialService: "unit-test-service",
-        credentialAccount: "unit-test-account",
-        usageURL: usageURL,
-        tokenURL: tokenURL,
-        session: session
-    )
-
-    _ = await provider.refresh()
-    await provider.reauthenticate()
-    let memoryUsage = await provider.refresh()
-    let ownerRotationUsage = await provider.refresh()
-    let authorizationHeaders = await usageRequests.requests.map {
-        $0.value(forHTTPHeaderField: "Authorization")
-    }
-
-    #expect(memoryUsage.state == .ok)
-    #expect(ownerRotationUsage.state == .unauthorized)
-    #expect(await tokenRequests.requests.count == 1)
-    #expect(authorizationHeaders == [
-        "Bearer expired-access-token",
-        "Bearer refreshed-access-token",
-        "Bearer expired-access-token"
-    ])
+    #expect(await tokenRequests.requests.isEmpty)
 }
 
 private func makeEndpointURL() -> URL {

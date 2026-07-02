@@ -8,15 +8,6 @@ struct ClaudeProvider: UsageProvider {
 
     static let defaultCredentialService = "Claude Code-credentials"
     static let defaultUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    static let defaultTokenURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
-    static let defaultOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-    static let defaultOAuthScopes = [
-        "user:profile",
-        "user:inference",
-        "user:sessions:claude_code",
-        "user:mcp_servers",
-        "user:file_upload"
-    ]
     static let defaultStatusLineFileURL = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/inference-meter-status.json")
@@ -27,8 +18,6 @@ struct ClaudeProvider: UsageProvider {
     private let credentialService: String
     private let credentialAccount: String
     private let usageURL: URL
-    private let tokenURL: URL
-    private let oauthClientID: String
     private let session: URLSession
     private let statusLineFallback: StatusLineFallback
     private let tokenStore: TokenStore
@@ -39,8 +28,6 @@ struct ClaudeProvider: UsageProvider {
         credentialService: String = ClaudeProvider.defaultCredentialService,
         credentialAccount: String = NSUserName(),
         usageURL: URL = ClaudeProvider.defaultUsageURL,
-        tokenURL: URL = ClaudeProvider.defaultTokenURL,
-        oauthClientID: String = ClaudeProvider.defaultOAuthClientID,
         session: URLSession = .shared,
         statusLineFallback: StatusLineFallback = .disabled,
         tokenStore: TokenStore = TokenStore(),
@@ -50,8 +37,6 @@ struct ClaudeProvider: UsageProvider {
         self.credentialService = credentialService
         self.credentialAccount = credentialAccount
         self.usageURL = usageURL
-        self.tokenURL = tokenURL
-        self.oauthClientID = oauthClientID
         self.session = session
         self.statusLineFallback = statusLineFallback
         self.tokenStore = tokenStore
@@ -88,25 +73,14 @@ struct ClaudeProvider: UsageProvider {
     }
 
     func reauthenticate() async {
-        do {
-            let credential = try readCredential()
-
-            if await tokenStore.adoptOwnerTokenIfChanged(credential.ownerSnapshot) {
-                return
-            }
-
-            guard let refreshToken = credential.refreshToken else {
-                return
-            }
-
-            let refreshedAccessToken = try await requestRefreshedAccessToken(
-                refreshToken: refreshToken,
-                credential: credential
-            )
-            await tokenStore.storeRefreshedAccessToken(refreshedAccessToken)
-        } catch {
+        // Read-only monitor: never perform an OAuth refresh_token exchange.
+        // Anthropic rotates the shared refresh token on use, which would invalidate
+        // the copy the Claude Code CLI stores on disk and force the CLI to re-login.
+        // We only adopt a token the CLI itself has already refreshed in the Keychain.
+        guard let credential = try? readCredential() else {
             return
         }
+        _ = await tokenStore.adoptOwnerTokenIfChanged(credential.ownerSnapshot)
     }
 
     static func parseStatusLine(_ data: Data, parsedAt: Date = Date()) throws -> Usage {
@@ -126,12 +100,6 @@ private extension ClaudeProvider {
         case missingAccessToken
     }
 
-    enum ClaudeReauthenticationError: Error, Sendable {
-        case missingAccessToken
-        case unusableHTTPResponse
-        case refreshRejected
-    }
-
     enum ClaudeStatusLineError: Error, Sendable {
         case unusablePayload
     }
@@ -149,39 +117,6 @@ private extension ClaudeProvider {
         request.httpMethod = "GET"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         return request
-    }
-
-    func requestRefreshedAccessToken(
-        refreshToken: String,
-        credential: ClaudeCredential
-    ) async throws -> String {
-        let body = ClaudeTokenRefreshRequest(
-            refreshToken: refreshToken,
-            clientID: credential.clientID ?? oauthClientID,
-            scope: (credential.scopes.isEmpty ? ClaudeProvider.defaultOAuthScopes : credential.scopes)
-                .joined(separator: " ")
-        )
-        var request = URLRequest(url: tokenURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ClaudeReauthenticationError.unusableHTTPResponse
-        }
-
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw ClaudeReauthenticationError.refreshRejected
-        }
-
-        let refreshResponse = try JSONDecoder().decode(ClaudeTokenRefreshResponse.self, from: data)
-        guard let accessToken = refreshResponse.accessToken?.nonEmpty else {
-            throw ClaudeReauthenticationError.missingAccessToken
-        }
-
-        return accessToken
     }
 
     func decodeCredential(from data: Data) throws -> ClaudeCredential {
@@ -300,28 +235,6 @@ private struct ClaudeAIOAuthCredential: Decodable, Sendable {
         case refreshToken
         case clientID = "clientId"
         case scopes
-    }
-}
-
-private struct ClaudeTokenRefreshRequest: Encodable {
-    var grantType = "refresh_token"
-    var refreshToken: String
-    var clientID: String
-    var scope: String
-
-    enum CodingKeys: String, CodingKey {
-        case grantType = "grant_type"
-        case refreshToken = "refresh_token"
-        case clientID = "client_id"
-        case scope
-    }
-}
-
-private struct ClaudeTokenRefreshResponse: Decodable {
-    var accessToken: String?
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
     }
 }
 
