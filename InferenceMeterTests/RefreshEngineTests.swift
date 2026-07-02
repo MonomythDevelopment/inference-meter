@@ -281,6 +281,53 @@ func missingWatchedDirectoriesAreSkippedWithoutCrashing() {
     #expect(engine.activeWatchCount == 0)
 }
 
+@MainActor
+@Test("Filesystem watcher observes nested file changes")
+func fileSystemWatcherObservesNestedFileChanges() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("InferenceMeterWatcherTests-\(UUID().uuidString)", isDirectory: true)
+    let nestedDirectory = rootDirectory.appendingPathComponent("2026/07/02", isDirectory: true)
+    try FileManager.default.createDirectory(at: nestedDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let provider = ScriptedUsageProvider(
+        provider: .codex,
+        responses: Array(
+            repeating: usage(
+                provider: .codex,
+                fiveHourPct: 12,
+                weeklyPct: 34,
+                updatedAt: Date(timeIntervalSince1970: 1_800_000_000)
+            ),
+            count: 3
+        )
+    )
+    let engine = RefreshEngine(
+        appState: AppState(),
+        providers: [provider],
+        clock: TestRefreshClock(),
+        configuration: testConfiguration(
+            fileSystemCoalescingWindow: 0.1,
+            watchedDirectories: [.codex: rootDirectory]
+        )
+    )
+    engine.startFileSystemWatches()
+    defer { engine.stop() }
+
+    try await Task.sleep(nanoseconds: 200_000_000)
+    try Data("nested event".utf8).write(
+        to: nestedDirectory.appendingPathComponent("rollout-test.jsonl", isDirectory: false),
+        options: .atomic
+    )
+
+    let deadline = Date().addingTimeInterval(3)
+    while await provider.refreshCallCount == 0 && Date() < deadline {
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+
+    #expect(await provider.refreshCallCount >= 1)
+}
+
 private actor ScriptedUsageProvider: UsageProvider {
     nonisolated let provider: Provider
     private var responses: [Usage]
@@ -369,12 +416,13 @@ private final class TestRefreshClock: RefreshClock {
 }
 
 private func testConfiguration(
+    fileSystemCoalescingWindow: TimeInterval = 2,
     watchedDirectories: [Provider: URL] = [:]
 ) -> RefreshEngineConfiguration {
     RefreshEngineConfiguration(
         pollInterval: 60,
         staleAfter: 300,
-        fileSystemCoalescingWindow: 2,
+        fileSystemCoalescingWindow: fileSystemCoalescingWindow,
         watchedDirectories: watchedDirectories
     )
 }
