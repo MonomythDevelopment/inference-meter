@@ -295,6 +295,54 @@ func codexProviderUnchangedAuthFileLeavesRetryUnauthorized() async throws {
     }
 }
 
+@Test("CodexProvider does not emit auth sentinels during refresh and reauthenticate")
+func codexProviderDoesNotEmitAuthSentinelsDuringRefreshAndReauthenticate() async throws {
+    try await withTemporaryHome { home in
+        let accessToken = "codex-access-sentinel-97E94A4F"
+        let refreshToken = "codex-refresh-sentinel-7697D019"
+        let tokenResponseSentinel = "codex-token-response-sentinel-C06D9390"
+        try writeAuthFile(
+            home: home,
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            lastRefresh: "2026-07-01T00:00:00Z"
+        )
+        let endpointURL = makeCodexEndpointURL()
+        let tokenURL = makeCodexTokenURL()
+        let tokenRequests = CodexRequestLog()
+        let session = makeCodexStubbedSession(for: endpointURL) { _ in
+            CodexHTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+        }
+        CodexStubURLProtocol.register(url: tokenURL) { request in
+            await tokenRequests.append(request)
+            return CodexHTTPStubResponse(
+                data: Data(#"{"access_token":"\#(tokenResponseSentinel)"}"#.utf8),
+                statusCode: 200
+            )
+        }
+        let provider = CodexProvider(
+            homeDirectory: home,
+            endpointConfiguration: CodexEndpointConfiguration(url: endpointURL),
+            session: session
+        )
+        var firstUsage: Usage?
+        var retryUsage: Usage?
+
+        let output = try await captureStandardOutput {
+            firstUsage = await provider.refresh()
+            await provider.reauthenticate()
+            retryUsage = await provider.refresh()
+        }
+
+        #expect(await tokenRequests.requests.isEmpty)
+        expectNoSecretLeaks(
+            output: output,
+            usages: [try #require(firstUsage), try #require(retryUsage)],
+            sentinels: [accessToken, refreshToken, tokenResponseSentinel]
+        )
+    }
+}
+
 @Test("CodexProvider endpoint unauthorized does not fall back to local rollout")
 func codexProviderUnauthorizedEndpointDoesNotFallBackToLocalUsage() async throws {
     try await withTemporaryHome { home in
