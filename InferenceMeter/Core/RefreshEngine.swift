@@ -328,7 +328,13 @@ private extension RefreshEngine {
         case .ok:
             await applySuccessfulRefresh(usage)
         case .unauthorized:
-            applyFailedRefresh(provider: usage.provider, state: .unauthorized)
+            let previousUsage = appState.usage(for: usage.provider)
+            if previousUsage.fiveHourPct != nil || previousUsage.weeklyPct != nil {
+                // The CLI owns token refresh; keep last-known usage visible during transient expiry.
+                applyFailedRefresh(provider: usage.provider, state: .stale)
+            } else {
+                applyFailedRefresh(provider: usage.provider, state: .unauthorized)
+            }
         case .stale, .unavailable:
             applyFailedRefresh(provider: usage.provider, state: .unavailable)
         }

@@ -45,10 +45,6 @@ actor TokenStore {
         inMemoryAccessToken = nil
         return true
     }
-
-    func storeRefreshedAccessToken(_ accessToken: String) {
-        inMemoryAccessToken = accessToken
-    }
 }
 
 private struct OwnerTokenIdentity: Equatable, Sendable {
