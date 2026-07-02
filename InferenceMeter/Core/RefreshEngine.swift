@@ -146,6 +146,10 @@ final class RefreshEngine {
         }
     }
 
+    func manualRefresh() {
+        refreshNow()
+    }
+
     func handleTimerTick() async {
         await refreshAll(bypassingBackoff: false)
         evaluateStaleness()
