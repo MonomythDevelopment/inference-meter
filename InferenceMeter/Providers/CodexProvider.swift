@@ -11,17 +11,12 @@ struct CodexEndpointConfiguration: Sendable, Equatable {
 }
 
 struct CodexProvider: UsageProvider {
-    static let defaultAuthRefreshURL = URL(string: "https://auth.openai.com/oauth/token")!
-    static let defaultOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
-
     let provider: Provider = .codex
 
     private let homeDirectory: URL
     private let endpointConfiguration: CodexEndpointConfiguration?
     private let session: URLSession
     private let authFileReader: FileReader
-    private let authRefreshURL: URL
-    private let oauthClientID: String
     private let tokenStore: TokenStore
 
     init(
@@ -29,16 +24,12 @@ struct CodexProvider: UsageProvider {
         endpointConfiguration: CodexEndpointConfiguration? = nil,
         session: URLSession = .shared,
         authFileReader: FileReader = FileReader(),
-        authRefreshURL: URL = CodexProvider.defaultAuthRefreshURL,
-        oauthClientID: String = CodexProvider.defaultOAuthClientID,
         tokenStore: TokenStore = TokenStore()
     ) {
         self.homeDirectory = homeDirectory
         self.endpointConfiguration = endpointConfiguration
         self.session = session
         self.authFileReader = authFileReader
-        self.authRefreshURL = authRefreshURL
-        self.oauthClientID = oauthClientID
         self.tokenStore = tokenStore
     }
 
@@ -69,24 +60,14 @@ struct CodexProvider: UsageProvider {
             return
         }
 
-        do {
-            guard let authSnapshot = try readAuthTokenSnapshot() else {
-                return
-            }
-
-            if await tokenStore.adoptOwnerTokenIfChanged(authSnapshot.ownerSnapshot) {
-                return
-            }
-
-            guard let refreshToken = authSnapshot.refreshToken else {
-                return
-            }
-
-            let refreshedAccessToken = try await requestRefreshedAccessToken(refreshToken: refreshToken)
-            await tokenStore.storeRefreshedAccessToken(refreshedAccessToken)
-        } catch {
+        // Read-only monitor: never perform an OAuth refresh_token exchange. OpenAI
+        // rotates the shared refresh token on use, which would invalidate the copy the
+        // Codex CLI stores in ~/.codex/auth.json and force the CLI to re-login. We only
+        // adopt a token the CLI itself has already refreshed on disk.
+        guard let authSnapshot = try? readAuthTokenSnapshot() else {
             return
         }
+        _ = await tokenStore.adoptOwnerTokenIfChanged(authSnapshot.ownerSnapshot)
     }
 }
 
@@ -95,12 +76,6 @@ private extension CodexProvider {
     static let newlineByte: UInt8 = 10
     static let carriageReturnByte: UInt8 = 13
     static let rateLimitsNeedle = Data(#""rate_limits""#.utf8)
-
-    enum CodexReauthenticationError: Error, Sendable {
-        case missingAccessToken
-        case unusableHTTPResponse
-        case refreshRejected
-    }
 
     var codexDirectory: URL {
         homeDirectory.appendingPathComponent(".codex", isDirectory: true)
@@ -315,33 +290,6 @@ private extension CodexProvider {
         }
     }
 
-    func requestRefreshedAccessToken(refreshToken: String) async throws -> String {
-        let body = CodexTokenRefreshRequest(
-            clientID: oauthClientID,
-            refreshToken: refreshToken
-        )
-        var request = URLRequest(url: authRefreshURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw CodexReauthenticationError.unusableHTTPResponse
-        }
-
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw CodexReauthenticationError.refreshRejected
-        }
-
-        let refreshResponse = try JSONDecoder().decode(CodexTokenRefreshResponse.self, from: data)
-        guard let accessToken = refreshResponse.accessToken?.nonEmpty else {
-            throw CodexReauthenticationError.missingAccessToken
-        }
-
-        return accessToken
-    }
-
     func readAuthTokenSnapshot() throws -> CodexAuthTokenSnapshot? {
         let data = try authFileReader.data(contentsOf: authFileURL)
         let authFile = try JSONDecoder().decode(CodexAuthFile.self, from: data)
@@ -454,26 +402,6 @@ private struct CodexAuthTokens: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
-    }
-}
-
-private struct CodexTokenRefreshRequest: Encodable {
-    var clientID: String
-    var grantType = "refresh_token"
-    var refreshToken: String
-
-    enum CodingKeys: String, CodingKey {
-        case clientID = "client_id"
-        case grantType = "grant_type"
-        case refreshToken = "refresh_token"
-    }
-}
-
-private struct CodexTokenRefreshResponse: Decodable {
-    var accessToken: String?
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
     }
 }
 
