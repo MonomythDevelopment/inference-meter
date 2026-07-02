@@ -64,6 +64,29 @@ x-app-ver
 The OAuth token endpoint is recorded for IM-010. The binary exposes the URL string and an
 `oauth-refresh` hint, but this spike did not safely confirm the refresh request body.
 
+## OAuth token refresh request shape
+
+IM-010 inspected the installed Claude Code `2.1.198` binary without reading or printing credential
+values. The minified OAuth refresh helper builds this JSON request:
+
+```text
+POST https://platform.claude.com/v1/oauth/token
+Content-Type: application/json
+
+grant_type: refresh_token
+refresh_token: Keychain credential's claudeAiOauth.refreshToken
+client_id: credential clientId when present, otherwise 9d1c250a-e61b-44d9-88ed-5944d1962f5e
+scope: credential scopes when present, otherwise user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload
+```
+
+The response includes `access_token`, may include a rotated `refresh_token`, and includes
+`expires_in` plus `scope`. Inference Meter uses only the returned access token and keeps it in
+memory. It does not write the Claude Code Keychain item.
+
+Sanitized fixture captures for the request, success body, and failure body are committed under
+`InferenceMeterTests/Fixtures/claude-token-refresh-*.json`. The fixture values are redacted and do
+not contain live bearer material.
+
 ## Request headers
 
 Confirmed sufficient request:

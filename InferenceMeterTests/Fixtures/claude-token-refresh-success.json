@@ -1,0 +1,6 @@
+{
+  "access_token": "<redacted-access-token>",
+  "refresh_token": "<redacted-refresh-token>",
+  "expires_in": 3600,
+  "scope": "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+}

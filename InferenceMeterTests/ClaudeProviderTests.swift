@@ -190,8 +190,258 @@ func claudeProviderStatusLineParserReadsUsedPercentageFixture() throws {
     #expect(usage.updatedAt == parsedAt)
 }
 
+@Test("ClaudeProvider refreshes an expired token into memory and retry succeeds")
+func claudeProviderRefreshesExpiredTokenIntoMemory() async throws {
+    let usageURL = makeEndpointURL()
+    let tokenURL = makeTokenURL()
+    let usageRequests = RequestLog()
+    let tokenRequests = RequestLog()
+    let session = makeStubbedSession(for: usageURL) { request in
+        await usageRequests.append(request)
+
+        if request.value(forHTTPHeaderField: "Authorization") == "Bearer refreshed-access-token" {
+            return HTTPStubResponse(
+                data: try fixtureData(named: "claude-usage-response.json"),
+                statusCode: 200
+            )
+        }
+
+        return HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+    }
+    StubURLProtocol.register(url: tokenURL) { request in
+        await tokenRequests.append(request)
+        return HTTPStubResponse(
+            data: Data(#"{"access_token":"refreshed-access-token","refresh_token":"next-refresh-token","expires_in":3600}"#.utf8),
+            statusCode: 200
+        )
+    }
+    let provider = ClaudeProvider(
+        keychain: keychainReturningCredential(
+            accessToken: "expired-access-token",
+            refreshToken: "refresh-token",
+            clientID: "unit-test-client",
+            scopes: ["user:inference"]
+        ),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        tokenURL: tokenURL,
+        session: session
+    )
+
+    let firstUsage = await provider.refresh()
+    await provider.reauthenticate()
+    let retryUsage = await provider.refresh()
+    let tokenRequest = await tokenRequests.requests.first
+    let tokenBodies = await tokenRequests.bodies
+    let tokenBody = try #require(tokenBodies.first ?? nil)
+    let tokenJSON = try #require(JSONSerialization.jsonObject(with: tokenBody) as? [String: String])
+
+    #expect(firstUsage.state == .unauthorized)
+    #expect(retryUsage.state == .ok)
+    #expect(await usageRequests.requests.count == 2)
+    #expect(await tokenRequests.requests.count == 1)
+    #expect(tokenRequest?.url == tokenURL)
+    #expect(tokenRequest?.httpMethod == "POST")
+    #expect(tokenRequest?.value(forHTTPHeaderField: "Content-Type") == "application/json")
+    #expect(tokenJSON["grant_type"] == "refresh_token")
+    #expect(tokenJSON["client_id"] == "unit-test-client")
+    #expect(tokenJSON["refresh_token"] == "refresh-token")
+    #expect(tokenJSON["scope"] == "user:inference")
+}
+
+@Test("ClaudeProvider adopts a rotated Keychain token before network refresh")
+func claudeProviderAdoptsRotatedKeychainTokenBeforeNetworkRefresh() async throws {
+    let usageURL = makeEndpointURL()
+    let tokenURL = makeTokenURL()
+    let tokenRequests = RequestLog()
+    let keychainSequence = CredentialSequence([
+        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "refresh-token"),
+        try claudeCredentialData(accessToken: "rotated-access-token", refreshToken: "refresh-token")
+    ])
+    let session = makeStubbedSession(for: usageURL) { request in
+        if request.value(forHTTPHeaderField: "Authorization") == "Bearer rotated-access-token" {
+            return HTTPStubResponse(
+                data: try fixtureData(named: "claude-usage-response.json"),
+                statusCode: 200
+            )
+        }
+
+        return HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+    }
+    StubURLProtocol.register(url: tokenURL) { request in
+        await tokenRequests.append(request)
+        return HTTPStubResponse(data: Data("{}".utf8), statusCode: 200)
+    }
+    let provider = ClaudeProvider(
+        keychain: keychainSequence.keychain(),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        tokenURL: tokenURL,
+        session: session
+    )
+
+    let firstUsage = await provider.refresh()
+    await provider.reauthenticate()
+    let retryUsage = await provider.refresh()
+
+    #expect(firstUsage.state == .unauthorized)
+    #expect(retryUsage.state == .ok)
+    #expect(keychainSequence.readCount == 3)
+    #expect(await tokenRequests.requests.isEmpty)
+}
+
+@Test("ClaudeProvider keeps prior token state when refresh-token exchange fails")
+func claudeProviderRefreshFailureLeavesRetryUnauthorized() async throws {
+    let usageURL = makeEndpointURL()
+    let tokenURL = makeTokenURL()
+    let session = makeStubbedSession(for: usageURL) { _ in
+        HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+    }
+    StubURLProtocol.register(url: tokenURL) { _ in
+        HTTPStubResponse(data: Data(#"{"error":"invalid_grant"}"#.utf8), statusCode: 400)
+    }
+    let provider = ClaudeProvider(
+        keychain: keychainReturningCredential(
+            accessToken: "expired-access-token",
+            refreshToken: "refresh-token"
+        ),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        tokenURL: tokenURL,
+        session: session
+    )
+
+    let firstUsage = await provider.refresh()
+    await provider.reauthenticate()
+    let retryUsage = await provider.refresh()
+
+    #expect(firstUsage.state == .unauthorized)
+    #expect(retryUsage.state == .unauthorized)
+}
+
+@Test("ClaudeProvider lets a later Keychain rotation supersede in-memory token")
+func claudeProviderKeychainRotationSupersedesInMemoryToken() async throws {
+    let usageURL = makeEndpointURL()
+    let tokenURL = makeTokenURL()
+    let usageRequests = RequestLog()
+    let keychainSequence = CredentialSequence([
+        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "refresh-token"),
+        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "refresh-token"),
+        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "refresh-token"),
+        try claudeCredentialData(accessToken: "rotated-access-token", refreshToken: "refresh-token")
+    ])
+    let session = makeStubbedSession(for: usageURL) { request in
+        await usageRequests.append(request)
+
+        switch request.value(forHTTPHeaderField: "Authorization") {
+        case "Bearer refreshed-access-token", "Bearer rotated-access-token":
+            return HTTPStubResponse(
+                data: try fixtureData(named: "claude-usage-response.json"),
+                statusCode: 200
+            )
+        default:
+            return HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+        }
+    }
+    StubURLProtocol.register(url: tokenURL) { _ in
+        HTTPStubResponse(
+            data: Data(#"{"access_token":"refreshed-access-token","expires_in":3600}"#.utf8),
+            statusCode: 200
+        )
+    }
+    let provider = ClaudeProvider(
+        keychain: keychainSequence.keychain(),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        tokenURL: tokenURL,
+        session: session
+    )
+
+    _ = await provider.refresh()
+    await provider.reauthenticate()
+    let memoryUsage = await provider.refresh()
+    let rotatedUsage = await provider.refresh()
+    let authorizationHeaders = await usageRequests.requests.map {
+        $0.value(forHTTPHeaderField: "Authorization")
+    }
+
+    #expect(memoryUsage.state == .ok)
+    #expect(rotatedUsage.state == .ok)
+    #expect(authorizationHeaders == [
+        "Bearer expired-access-token",
+        "Bearer refreshed-access-token",
+        "Bearer rotated-access-token"
+    ])
+}
+
+@Test("ClaudeProvider treats refresh-token Keychain rotations as owner changes")
+func claudeProviderRefreshTokenRotationClearsInMemoryToken() async throws {
+    let usageURL = makeEndpointURL()
+    let tokenURL = makeTokenURL()
+    let usageRequests = RequestLog()
+    let tokenRequests = RequestLog()
+    let keychainSequence = CredentialSequence([
+        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "old-refresh-token"),
+        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "old-refresh-token"),
+        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "old-refresh-token"),
+        try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "rotated-refresh-token")
+    ])
+    let session = makeStubbedSession(for: usageURL) { request in
+        await usageRequests.append(request)
+
+        if request.value(forHTTPHeaderField: "Authorization") == "Bearer refreshed-access-token" {
+            return HTTPStubResponse(
+                data: try fixtureData(named: "claude-usage-response.json"),
+                statusCode: 200
+            )
+        }
+
+        return HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+    }
+    StubURLProtocol.register(url: tokenURL) { request in
+        await tokenRequests.append(request)
+        return HTTPStubResponse(
+            data: Data(#"{"access_token":"refreshed-access-token","expires_in":3600}"#.utf8),
+            statusCode: 200
+        )
+    }
+    let provider = ClaudeProvider(
+        keychain: keychainSequence.keychain(),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        tokenURL: tokenURL,
+        session: session
+    )
+
+    _ = await provider.refresh()
+    await provider.reauthenticate()
+    let memoryUsage = await provider.refresh()
+    let ownerRotationUsage = await provider.refresh()
+    let authorizationHeaders = await usageRequests.requests.map {
+        $0.value(forHTTPHeaderField: "Authorization")
+    }
+
+    #expect(memoryUsage.state == .ok)
+    #expect(ownerRotationUsage.state == .unauthorized)
+    #expect(await tokenRequests.requests.count == 1)
+    #expect(authorizationHeaders == [
+        "Bearer expired-access-token",
+        "Bearer refreshed-access-token",
+        "Bearer expired-access-token"
+    ])
+}
+
 private func makeEndpointURL() -> URL {
     URL(string: "https://unit.test/oauth/usage/\(UUID().uuidString)")!
+}
+
+private func makeTokenURL() -> URL {
+    URL(string: "https://unit.test/oauth/token/\(UUID().uuidString)")!
 }
 
 private actor RequestCapture {
@@ -200,6 +450,44 @@ private actor RequestCapture {
     func capture(_ request: URLRequest) {
         self.request = request
     }
+}
+
+private actor RequestLog {
+    private(set) var requests: [URLRequest] = []
+    private(set) var bodies: [Data?] = []
+
+    func append(_ request: URLRequest) {
+        requests.append(request)
+        bodies.append(httpBodyData(from: request))
+    }
+}
+
+private func httpBodyData(from request: URLRequest) -> Data? {
+    if let httpBody = request.httpBody {
+        return httpBody
+    }
+
+    guard let stream = request.httpBodyStream else {
+        return nil
+    }
+
+    stream.open()
+    defer { stream.close() }
+
+    var data = Data()
+    let bufferSize = 1_024
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+
+    while stream.hasBytesAvailable {
+        let count = stream.read(buffer, maxLength: bufferSize)
+        guard count > 0 else {
+            break
+        }
+        data.append(buffer, count: count)
+    }
+
+    return data
 }
 
 private struct HTTPStubResponse {
@@ -232,7 +520,7 @@ private final class HTTPStubRegistry: @unchecked Sendable {
 }
 
 private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
-    private nonisolated(unsafe) static let registry = HTTPStubRegistry()
+    private static let registry = HTTPStubRegistry()
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -284,9 +572,89 @@ private func makeStubbedSession(
     return URLSession(configuration: configuration)
 }
 
-private func keychainReturningCredential(accessToken: String = "unit-test-access-token") -> Keychain {
+private func keychainReturningCredential(
+    accessToken: String = "unit-test-access-token",
+    refreshToken: String? = nil,
+    clientID: String? = nil,
+    scopes: [String]? = nil
+) -> Keychain {
     Keychain { _, _ in
-        Data(#"{"claudeAiOauth":{"accessToken":"\#(accessToken)"}}"#.utf8)
+        try claudeCredentialData(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            clientID: clientID,
+            scopes: scopes
+        )
+    }
+}
+
+private final class CredentialSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var credentials: [Data]
+    private var readCounter = 0
+
+    var readCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return readCounter
+    }
+
+    init(_ credentials: [Data]) {
+        self.credentials = credentials
+    }
+
+    func keychain() -> Keychain {
+        Keychain { _, _ in
+            self.nextCredential()
+        }
+    }
+
+    private func nextCredential() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+
+        readCounter += 1
+        guard credentials.count > 1 else {
+            return credentials[0]
+        }
+
+        return credentials.removeFirst()
+    }
+}
+
+private func claudeCredentialData(
+    accessToken: String,
+    refreshToken: String? = nil,
+    clientID: String? = nil,
+    scopes: [String]? = nil
+) throws -> Data {
+    try JSONEncoder().encode(
+        ClaudeCredentialFixture(
+            claudeAiOauth: ClaudeCredentialFixture.OAuth(
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+                clientID: clientID,
+                scopes: scopes
+            )
+        )
+    )
+}
+
+private struct ClaudeCredentialFixture: Encodable {
+    var claudeAiOauth: OAuth
+
+    struct OAuth: Encodable {
+        var accessToken: String
+        var refreshToken: String?
+        var clientID: String?
+        var scopes: [String]?
+
+        enum CodingKeys: String, CodingKey {
+            case accessToken
+            case refreshToken
+            case clientID = "clientId"
+            case scopes
+        }
     }
 }
 
