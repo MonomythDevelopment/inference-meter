@@ -69,7 +69,24 @@ No literal 401 was observed during this run; invalid bearer probes returned the 
 
 - The auth file's refresh timestamp field was present during this run; its value was not copied into the repo.
 - The script reads the auth file at startup and does not attempt refresh. IM-010 should first try re-reading the auth file after a live Codex CLI refresh, because the CLI owns refresh and rewrites this file.
-- Replicating refresh against the upstream account refresh endpoint remains deferred until a real stale-token case proves re-read insufficient.
+- IM-010 inspected the official OpenAI Codex source (`codex-rs/login/src/auth/manager.rs`) to capture the refresh-token request. Codex refreshes against `https://auth.openai.com/oauth/token`, not the account-context API path. The request is JSON:
+
+```text
+POST https://auth.openai.com/oauth/token
+Content-Type: application/json
+
+client_id: app_EMoamEEZ73f0CkXaXp7hrann
+grant_type: refresh_token
+refresh_token: tokens.refresh_token from auth.json
+```
+
+The response includes `access_token` and may include a rotated `refresh_token`. Inference Meter uses
+only the returned access token and keeps it in memory. It never writes `~/.codex/auth.json`, leaving
+Codex's own `last_refresh` bookkeeping untouched.
+
+Sanitized fixture captures for the request, success body, and failure body are committed under
+`InferenceMeterTests/Fixtures/codex-token-refresh-*.json`. The fixture values are redacted and do
+not contain live bearer material.
 
 ## JSONL Fallback Fixture
 

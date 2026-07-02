@@ -11,17 +11,35 @@ struct CodexEndpointConfiguration: Sendable, Equatable {
 }
 
 struct CodexProvider: UsageProvider {
+    static let defaultAuthRefreshURL = URL(string: "https://auth.openai.com/oauth/token")!
+    static let defaultOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+
     let provider: Provider = .codex
 
     private let homeDirectory: URL
     private let endpointConfiguration: CodexEndpointConfiguration?
+    private let session: URLSession
+    private let authFileReader: FileReader
+    private let authRefreshURL: URL
+    private let oauthClientID: String
+    private let tokenStore: TokenStore
 
     init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
-        endpointConfiguration: CodexEndpointConfiguration? = nil
+        endpointConfiguration: CodexEndpointConfiguration? = nil,
+        session: URLSession = .shared,
+        authFileReader: FileReader = FileReader(),
+        authRefreshURL: URL = CodexProvider.defaultAuthRefreshURL,
+        oauthClientID: String = CodexProvider.defaultOAuthClientID,
+        tokenStore: TokenStore = TokenStore()
     ) {
         self.homeDirectory = homeDirectory
         self.endpointConfiguration = endpointConfiguration
+        self.session = session
+        self.authFileReader = authFileReader
+        self.authRefreshURL = authRefreshURL
+        self.oauthClientID = oauthClientID
+        self.tokenStore = tokenStore
     }
 
     func refresh() async -> Usage {
@@ -34,12 +52,41 @@ struct CodexProvider: UsageProvider {
             return endpointUsage
         }
 
+        guard endpointUsage.state != .unauthorized else {
+            return endpointUsage
+        }
+
         let localUsage = refreshFromLocalFile()
         if localUsage.state == .ok {
             return localUsage
         }
 
-        return endpointUsage.state == .unauthorized ? endpointUsage : localUsage
+        return localUsage
+    }
+
+    func reauthenticate() async {
+        guard endpointConfiguration != nil else {
+            return
+        }
+
+        do {
+            guard let authSnapshot = try readAuthTokenSnapshot() else {
+                return
+            }
+
+            if await tokenStore.adoptOwnerTokenIfChanged(authSnapshot.ownerSnapshot) {
+                return
+            }
+
+            guard let refreshToken = authSnapshot.refreshToken else {
+                return
+            }
+
+            let refreshedAccessToken = try await requestRefreshedAccessToken(refreshToken: refreshToken)
+            await tokenStore.storeRefreshedAccessToken(refreshedAccessToken)
+        } catch {
+            return
+        }
     }
 }
 
@@ -48,6 +95,12 @@ private extension CodexProvider {
     static let newlineByte: UInt8 = 10
     static let carriageReturnByte: UInt8 = 13
     static let rateLimitsNeedle = Data(#""rate_limits""#.utf8)
+
+    enum CodexReauthenticationError: Error, Sendable {
+        case missingAccessToken
+        case unusableHTTPResponse
+        case refreshRejected
+    }
 
     var codexDirectory: URL {
         homeDirectory.appendingPathComponent(".codex", isDirectory: true)
@@ -209,23 +262,14 @@ private extension CodexProvider {
             return unavailableUsage(source: .endpoint)
         }
 
-        guard let accessToken = try? readAuthAccessToken() else {
+        guard let authSnapshot = try? readAuthTokenSnapshot() else {
             return unauthorizedUsage(source: .endpoint)
         }
-
-        let firstAttempt = await requestEndpoint(
-            endpointConfiguration,
-            accessToken: accessToken
-        )
-
-        guard firstAttempt.state == .unauthorized,
-              let retryAccessToken = try? readAuthAccessToken() else {
-            return firstAttempt
-        }
+        let accessToken = await tokenStore.accessToken(for: authSnapshot.ownerSnapshot)
 
         return await requestEndpoint(
             endpointConfiguration,
-            accessToken: retryAccessToken
+            accessToken: accessToken
         )
     }
 
@@ -246,7 +290,7 @@ private extension CodexProvider {
         }
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 return unavailableUsage(source: .endpoint)
             }
@@ -271,10 +315,45 @@ private extension CodexProvider {
         }
     }
 
-    func readAuthAccessToken() throws -> String? {
-        let data = try Data(contentsOf: authFileURL)
+    func requestRefreshedAccessToken(refreshToken: String) async throws -> String {
+        let body = CodexTokenRefreshRequest(
+            clientID: oauthClientID,
+            refreshToken: refreshToken
+        )
+        var request = URLRequest(url: authRefreshURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CodexReauthenticationError.unusableHTTPResponse
+        }
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw CodexReauthenticationError.refreshRejected
+        }
+
+        let refreshResponse = try JSONDecoder().decode(CodexTokenRefreshResponse.self, from: data)
+        guard let accessToken = refreshResponse.accessToken?.nonEmpty else {
+            throw CodexReauthenticationError.missingAccessToken
+        }
+
+        return accessToken
+    }
+
+    func readAuthTokenSnapshot() throws -> CodexAuthTokenSnapshot? {
+        let data = try authFileReader.data(contentsOf: authFileURL)
         let authFile = try JSONDecoder().decode(CodexAuthFile.self, from: data)
-        return authFile.tokens?.accessToken?.nonEmpty
+        guard let accessToken = authFile.tokens?.accessToken?.nonEmpty else {
+            return nil
+        }
+
+        return CodexAuthTokenSnapshot(
+            accessToken: accessToken,
+            refreshToken: authFile.tokens?.refreshToken?.nonEmpty,
+            lastRefresh: authFile.lastRefresh
+        )
     }
 
     func directoryExists(at url: URL) -> Bool {
@@ -342,11 +421,55 @@ private extension CodexProvider {
     }
 }
 
+private struct CodexAuthTokenSnapshot: Sendable {
+    var accessToken: String
+    var refreshToken: String?
+    var lastRefresh: Date?
+
+    var ownerSnapshot: OwnerTokenSnapshot {
+        OwnerTokenSnapshot(accessToken: accessToken, refreshedAt: lastRefresh, refreshToken: refreshToken)
+    }
+}
+
 private struct CodexAuthFile: Decodable, Sendable {
     var tokens: CodexAuthTokens?
+    var lastRefresh: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case tokens
+        case lastRefresh = "last_refresh"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tokens = try container.decodeIfPresent(CodexAuthTokens.self, forKey: .tokens)
+        lastRefresh = container.decodeFlexibleDateIfPresent(forKey: .lastRefresh)
+    }
 }
 
 private struct CodexAuthTokens: Decodable, Sendable {
+    var accessToken: String?
+    var refreshToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+    }
+}
+
+private struct CodexTokenRefreshRequest: Encodable {
+    var clientID: String
+    var grantType = "refresh_token"
+    var refreshToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case grantType = "grant_type"
+        case refreshToken = "refresh_token"
+    }
+}
+
+private struct CodexTokenRefreshResponse: Decodable {
     var accessToken: String?
 
     enum CodingKeys: String, CodingKey {
@@ -402,7 +525,8 @@ private extension KeyedDecodingContainer {
 
 private extension String {
     var nonEmpty: String? {
-        isEmpty ? nil : self
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
