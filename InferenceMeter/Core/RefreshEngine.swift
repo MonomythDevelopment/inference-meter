@@ -1,5 +1,5 @@
 @preconcurrency import AppKit
-import Darwin
+@preconcurrency import CoreServices
 import Foundation
 import Observation
 
@@ -177,13 +177,26 @@ final class RefreshEngine {
         }
     }
 
+    func handleCoalescedFileSystemEvent(for provider: Provider) {
+        coalescingTasks[provider]?.cancel()
+        coalescingTasks[provider] = nil
+
+        Task { [weak self] in
+            await self?.refresh(provider: provider, bypassingBackoff: false)
+        }
+    }
+
     func startFileSystemWatches() {
         for (provider, directory) in configuration.watchedDirectories where directoryWatchers[provider] == nil {
-            guard let watcher = DirectoryWatcher(url: directory, eventHandler: { [weak self] in
-                Task { @MainActor [weak self] in
-                    self?.handleFileSystemEvent(for: provider)
+            guard let watcher = DirectoryWatcher(
+                url: directory,
+                latency: configuration.fileSystemCoalescingWindow,
+                eventHandler: { [weak self] in
+                    Task { @MainActor [weak self] in
+                        self?.handleCoalescedFileSystemEvent(for: provider)
+                    }
                 }
-            }) else {
+            ) else {
                 continue
             }
 
@@ -387,31 +400,60 @@ private extension Usage {
 }
 
 private final class DirectoryWatcher {
-    private let source: DispatchSourceFileSystemObject
+    private var stream: FSEventStreamRef?
+    private let eventHandler: () -> Void
     private var isCancelled = false
 
-    init?(url: URL, eventHandler: @escaping () -> Void) {
+    init?(url: URL, latency: TimeInterval, eventHandler: @escaping () -> Void) {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
             return nil
         }
 
-        let descriptor = open(url.path, O_EVTONLY)
-        guard descriptor >= 0 else {
+        self.eventHandler = eventHandler
+
+        var context = FSEventStreamContext(
+            version: 0,
+            info: Unmanaged.passUnretained(self).toOpaque(),
+            retain: nil,
+            release: nil,
+            copyDescription: nil
+        )
+        let flags = FSEventStreamCreateFlags(
+            kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagWatchRoot
+        )
+
+        guard let stream = FSEventStreamCreate(
+            nil,
+            Self.streamCallback,
+            &context,
+            [url.path] as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            latency,
+            flags
+        ) else {
             return nil
         }
 
-        source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: descriptor,
-            eventMask: [.attrib, .delete, .extend, .rename, .write],
-            queue: .main
-        )
-        source.setEventHandler(handler: eventHandler)
-        source.setCancelHandler {
-            close(descriptor)
+        FSEventStreamSetDispatchQueue(stream, .main)
+
+        guard FSEventStreamStart(stream) else {
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            return nil
         }
-        source.resume()
+
+        self.stream = stream
+    }
+
+    private static let streamCallback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        guard let info else {
+            return
+        }
+
+        let watcher = Unmanaged<DirectoryWatcher>.fromOpaque(info).takeUnretainedValue()
+        watcher.eventHandler()
     }
 
     func cancel() {
@@ -420,7 +462,14 @@ private final class DirectoryWatcher {
         }
 
         isCancelled = true
-        source.cancel()
+        guard let stream else {
+            return
+        }
+
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        self.stream = nil
     }
 
     deinit {
