@@ -195,8 +195,8 @@ func stalenessFlipsAtFiveMinuteBoundaryAndPreservesValues() {
 }
 
 @MainActor
-@Test("Persistent 401 invokes one reauthenticate retry and lands unauthorized")
-func persistentUnauthorizedInvokesSingleReauthenticateRetry() async {
+@Test("Persistent 401 with prior data invokes one reauthenticate retry and becomes stale")
+func persistentUnauthorizedWithPriorDataInvokesSingleReauthenticateRetryAndBecomesStale() async {
     let start = Date(timeIntervalSince1970: 1_800_000_000)
     let clock = TestRefreshClock(now: start)
     let appState = AppState(
@@ -221,9 +221,38 @@ func persistentUnauthorizedInvokesSingleReauthenticateRetry() async {
 
     #expect(await provider.refreshCallCount == 2)
     #expect(await provider.reauthenticateCallCount == 1)
-    #expect(appState.codex.state == .unauthorized)
+    #expect(appState.codex.state == .stale)
     #expect(appState.codex.fiveHourPct == 18)
     #expect(appState.codex.weeklyPct == 29)
+}
+
+@MainActor
+@Test("Persistent 401 with no prior data lands unauthorized")
+func persistentUnauthorizedWithNoPriorDataLandsUnauthorized() async {
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    let clock = TestRefreshClock(now: start)
+    let appState = AppState()
+    let provider = ScriptedUsageProvider(
+        provider: .codex,
+        responses: [
+            usage(provider: .codex, fiveHourPct: nil, weeklyPct: nil, updatedAt: start, state: .unauthorized),
+            usage(provider: .codex, fiveHourPct: nil, weeklyPct: nil, updatedAt: start, state: .unauthorized)
+        ]
+    )
+    let engine = RefreshEngine(
+        appState: appState,
+        providers: [provider],
+        clock: clock,
+        configuration: testConfiguration()
+    )
+
+    await engine.refresh(provider: .codex, bypassingBackoff: true)
+
+    #expect(await provider.refreshCallCount == 2)
+    #expect(await provider.reauthenticateCallCount == 1)
+    #expect(appState.codex.state == .unauthorized)
+    #expect(appState.codex.fiveHourPct == nil)
+    #expect(appState.codex.weeklyPct == nil)
 }
 
 @MainActor
