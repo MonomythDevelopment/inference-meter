@@ -12,6 +12,13 @@ func thresholdColorsFollowBoundaries() {
     #expect(thresholdColor(100) == Color(.systemRed))
 }
 
+@Test("Threshold predicate treats equality as crossing the boundary")
+func thresholdPredicateTreatsEqualityAsCrossingBoundary() {
+    #expect(!isAtOrAboveUsageThreshold(79.9, threshold: 80))
+    #expect(isAtOrAboveUsageThreshold(80, threshold: 80))
+    #expect(isAtOrAboveUsageThreshold(95.1, threshold: 95))
+}
+
 @Test("Full mode renders both providers with independently colored values")
 func fullModeRendersBothProvidersWithIndependentValueColors() {
     let segments = labelSegments(

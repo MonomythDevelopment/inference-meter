@@ -80,6 +80,7 @@ struct RefreshEngineConfiguration {
 final class RefreshEngine {
     private let appState: AppState
     private let providers: [any UsageProvider]
+    private let notifier: (any UsageThresholdNotifying)?
     private let clock: RefreshClock
     private let configuration: RefreshEngineConfiguration
     private var refreshState: [Provider: ProviderRefreshState]
@@ -94,11 +95,13 @@ final class RefreshEngine {
     init(
         appState: AppState,
         providers: [any UsageProvider],
+        notifier: (any UsageThresholdNotifying)? = nil,
         clock: RefreshClock = SystemRefreshClock(),
         configuration: RefreshEngineConfiguration = RefreshEngineConfiguration()
     ) {
         self.appState = appState
         self.providers = providers
+        self.notifier = notifier
         self.clock = clock
         self.configuration = configuration
         self.refreshState = Dictionary(
@@ -215,11 +218,11 @@ final class RefreshEngine {
         if firstUsage.state == .unauthorized {
             await provider.reauthenticate()
             let retryUsage = await provider.refresh()
-            applyRefreshResult(retryUsage.state == .ok ? retryUsage : markedUnauthorized(provider: providerID))
+            await applyRefreshResult(retryUsage.state == .ok ? retryUsage : markedUnauthorized(provider: providerID))
             return
         }
 
-        applyRefreshResult(firstUsage)
+        await applyRefreshResult(firstUsage)
     }
 
     func evaluateStaleness() {
@@ -307,10 +310,10 @@ private extension RefreshEngine {
         return clock.now >= state.nextAllowedAt
     }
 
-    func applyRefreshResult(_ usage: Usage) {
+    func applyRefreshResult(_ usage: Usage) async {
         switch usage.state {
         case .ok:
-            applySuccessfulRefresh(usage)
+            await applySuccessfulRefresh(usage)
         case .unauthorized:
             applyFailedRefresh(provider: usage.provider, state: .unauthorized)
         case .stale, .unavailable:
@@ -318,11 +321,12 @@ private extension RefreshEngine {
         }
     }
 
-    func applySuccessfulRefresh(_ usage: Usage) {
+    func applySuccessfulRefresh(_ usage: Usage) async {
         var refreshedUsage = usage
         refreshedUsage.updatedAt = usage.updatedAt ?? clock.now
         appState.setUsage(refreshedUsage)
         refreshState[usage.provider, default: ProviderRefreshState()].recordSuccess()
+        await notifier?.evaluate(state: appState)
     }
 
     func applyFailedRefresh(provider: Provider, state: UsageState) {

@@ -5,10 +5,13 @@ import SwiftUI
 struct InferenceMeterApp: App {
     @State private var appState: AppState
     private let refreshEngine: RefreshEngine
+    private let notifier: Notifier
 
     init() {
         let appState = AppState()
+        let notifier = Notifier()
         self._appState = State(initialValue: appState)
+        self.notifier = notifier
         let codexProvider = CodexProvider()
 
         let providers: [any UsageProvider] = if Self.isRunningTests {
@@ -25,7 +28,8 @@ struct InferenceMeterApp: App {
 
         self.refreshEngine = RefreshEngine(
             appState: appState,
-            providers: providers
+            providers: providers,
+            notifier: notifier
         )
 
         guard !Self.isRunningTests else {
@@ -42,7 +46,7 @@ struct InferenceMeterApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            DetailPopover(engine: refreshEngine)
+            DetailPopover(engine: refreshEngine, notifier: notifier)
                 .environment(appState)
         } label: {
             MenuBarLabel()

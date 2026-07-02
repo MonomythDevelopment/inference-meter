@@ -10,6 +10,14 @@ func countdownFormatsFutureResetWindows() {
     #expect(countdownString(to: resetsAt, now: now) == "2h 14m")
 }
 
+@Test("Countdown formats multi-day reset windows")
+func countdownFormatsMultiDayResetWindows() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let resetsAt = now.addingTimeInterval((3 * 24 * 60 * 60) + (5 * 60 * 60) + (42 * 60))
+
+    #expect(countdownString(to: resetsAt, now: now) == "3d 5h")
+}
+
 @Test("Countdown omits nil reset times")
 func countdownOmitsNilResetTimes() {
     let now = Date(timeIntervalSince1970: 1_800_000_000)

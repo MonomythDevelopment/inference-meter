@@ -23,15 +23,20 @@ struct MenuBarLabelSegment: Equatable {
     let color: Color
 }
 
+func isAtOrAboveUsageThreshold(_ pct: Double, threshold: Double) -> Bool {
+    pct >= threshold
+}
+
 func thresholdColor(_ pct: Double) -> Color {
-    switch pct {
-    case ..<70:
-        Color(.systemGreen)
-    case ..<90:
-        Color(.systemOrange)
-    default:
-        Color(.systemRed)
+    if isAtOrAboveUsageThreshold(pct, threshold: 90) {
+        return Color(.systemRed)
     }
+
+    if isAtOrAboveUsageThreshold(pct, threshold: 70) {
+        return Color(.systemOrange)
+    }
+
+    return Color(.systemGreen)
 }
 
 func labelSegments(claude: Usage, codex: Usage, compact: Bool) -> [MenuBarLabelSegment] {

@@ -15,8 +15,14 @@ func countdownString(to resetsAt: Date?, now: Date) -> String? {
     }
 
     let remainingMinutes = max(1, remainingSeconds / 60)
-    let hours = remainingMinutes / 60
+    let totalHours = remainingMinutes / 60
+    let days = totalHours / 24
+    let hours = totalHours % 24
     let minutes = remainingMinutes % 60
+
+    guard days == 0 else {
+        return "\(days)d \(hours)h"
+    }
 
     guard hours > 0 else {
         return "\(minutes)m"
@@ -43,10 +49,12 @@ func relativeUpdatedString(from updatedAt: Date, now: Date) -> String {
 struct DetailPopover: View {
     @Environment(AppState.self) private var appState
     @AppStorage("compactLabel") private var isCompactLabel = false
+    @AppStorage(Notifier.notificationsEnabledKey) private var notificationsEnabled = false
     @State private var launchAtLoginState = LaunchAtLoginState.current()
     @State private var launchAtLoginError: String?
 
     let engine: RefreshEngine
+    let notifier: Notifier
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -83,6 +91,16 @@ struct DetailPopover: View {
                 .keyboardShortcut("r")
 
             Toggle("Compact menu bar label", isOn: $isCompactLabel)
+
+            Toggle(
+                "Notify at 80% / 95%",
+                isOn: Binding(
+                    get: { notificationsEnabled },
+                    set: { shouldEnable in
+                        handleNotificationToggleChange(shouldEnable)
+                    }
+                )
+            )
 
             Toggle(
                 "Launch at Login",
@@ -138,6 +156,25 @@ struct DetailPopover: View {
         }
 
         refreshLaunchAtLoginStatus()
+    }
+
+    private func handleNotificationToggleChange(_ shouldEnable: Bool) {
+        guard shouldEnable else {
+            notificationsEnabled = false
+            return
+        }
+
+        notificationsEnabled = true
+
+        Task {
+            let isAuthorized = await notifier.requestAuthorizationIfNeeded()
+
+            guard !isAuthorized else {
+                return
+            }
+
+            notificationsEnabled = false
+        }
     }
 
     private func refreshLaunchAtLoginStatus() {
