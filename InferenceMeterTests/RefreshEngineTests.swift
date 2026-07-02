@@ -63,6 +63,54 @@ func successResetsBackoffToBaseInterval() async {
 }
 
 @MainActor
+@Test("Successful refresh evaluates notifier after publishing state")
+func successfulRefreshEvaluatesNotifierAfterPublishingState() async {
+    let clock = TestRefreshClock()
+    let notifier = RecordingUsageThresholdNotifier()
+    let provider = ScriptedUsageProvider(
+        provider: .codex,
+        responses: [
+            usage(provider: .codex, fiveHourPct: 82, weeklyPct: 41, updatedAt: clock.now)
+        ]
+    )
+    let appState = AppState()
+    let engine = RefreshEngine(
+        appState: appState,
+        providers: [provider],
+        notifier: notifier,
+        clock: clock,
+        configuration: testConfiguration()
+    )
+
+    await engine.refresh(provider: .codex, bypassingBackoff: true)
+
+    #expect(notifier.codexFiveHourPercentages == [82])
+    #expect(notifier.codexStates == [.ok])
+}
+
+@MainActor
+@Test("Failed refresh does not evaluate notifier")
+func failedRefreshDoesNotEvaluateNotifier() async {
+    let notifier = RecordingUsageThresholdNotifier()
+    let provider = ScriptedUsageProvider(
+        provider: .codex,
+        responses: [.unavailable(provider: .codex)]
+    )
+    let engine = RefreshEngine(
+        appState: AppState(),
+        providers: [provider],
+        notifier: notifier,
+        clock: TestRefreshClock(),
+        configuration: testConfiguration()
+    )
+
+    await engine.refresh(provider: .codex, bypassingBackoff: true)
+
+    #expect(notifier.codexFiveHourPercentages.isEmpty)
+    #expect(notifier.codexStates.isEmpty)
+}
+
+@MainActor
 @Test("Per-provider backoff state is independent")
 func perProviderBackoffStateIsIndependent() async {
     let clock = TestRefreshClock()
@@ -256,6 +304,17 @@ private actor ScriptedUsageProvider: UsageProvider {
 
     func reauthenticate() async {
         reauthenticateCallCount += 1
+    }
+}
+
+@MainActor
+private final class RecordingUsageThresholdNotifier: UsageThresholdNotifying {
+    private(set) var codexFiveHourPercentages: [Double?] = []
+    private(set) var codexStates: [UsageState] = []
+
+    func evaluate(state: AppState) async {
+        codexFiveHourPercentages.append(state.codex.fiveHourPct)
+        codexStates.append(state.codex.state)
     }
 }
 
