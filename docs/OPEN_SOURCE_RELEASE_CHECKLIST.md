@@ -32,6 +32,8 @@ Use this checklist before changing the repository from private to public.
 
 ## Signed binary distribution
 
+> Blocked on distribution credentials: the release Mac has no Monomyth Development Developer ID Application identity or notarization keychain profile. Never publish the ad-hoc validation archive.
+
 - [ ] Build with a Monomyth Development Developer ID Application certificate.
 - [ ] Notarize the app, staple the ticket, and verify Gatekeeper acceptance.
 - [ ] Confirm the app launches on a clean macOS user account and reads neither credential without user authorization.
@@ -40,7 +42,7 @@ Use this checklist before changing the repository from private to public.
 
 ## After publication
 
-- [ ] Verify GitHub detects the MIT license and renders all community files.
-- [ ] Verify the CI badge and public links in `README.md`.
-- [ ] Announce the support and security boundaries with the release.
+- [x] Verify GitHub detects the MIT license and renders all community files.
+- [x] Verify the CI badge and all public documentation links.
+- [x] Announce the support and security boundaries with the release.
 - [ ] Monitor the first public issues for accidental credential disclosure.
