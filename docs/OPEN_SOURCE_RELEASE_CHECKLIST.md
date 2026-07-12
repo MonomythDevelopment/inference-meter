@@ -1,0 +1,40 @@
+# Open-source release checklist
+
+Use this checklist before changing the repository from private to public.
+
+## Source and community health
+
+- [x] Add a detectable open-source license.
+- [x] Attribute the project to Monomyth Development.
+- [x] Document installation, privacy boundaries, limitations, and non-affiliation.
+- [x] Add contribution, support, conduct, and security policies.
+- [x] Add issue forms, a pull request template, and read-only CI permissions.
+- [x] Replace the pre-public bundle identifier with `dev.monomyth.InferenceMeter`.
+- [ ] Review the complete Git history and decide whether non-secret local environment metadata warrants a history rewrite. Complete any rewrite before accepting public forks.
+
+## GitHub settings
+
+- [ ] Enable private vulnerability reporting.
+- [x] Add the repository description, homepage, and topics.
+- [ ] Protect `main` and require the `Test and build` CI check.
+- [ ] Confirm issue labels referenced by the forms exist (`bug` and `enhancement`).
+- [ ] Decide whether to enable Discussions.
+- [ ] Change repository visibility to public only after every blocking item is complete.
+
+## Release artifact
+
+- [ ] Confirm `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
+- [ ] Run `make test` and `make build` from a clean checkout.
+- [ ] Build with a Monomyth Development Developer ID Application certificate.
+- [ ] Notarize the app, staple the ticket, and verify Gatekeeper acceptance.
+- [ ] Confirm the app launches on a clean macOS user account and reads neither credential without user authorization.
+- [ ] Create the signed `v0.1.2` tag and GitHub release.
+- [ ] Upload `InferenceMeter-0.1.2.zip` and a SHA-256 checksum.
+- [ ] Verify the release instructions and download on a separate Mac or clean VM.
+
+## After publication
+
+- [ ] Verify GitHub detects the MIT license and renders all community files.
+- [ ] Verify the CI badge and public links in `README.md`.
+- [ ] Announce the support and security boundaries with the release.
+- [ ] Monitor the first public issues for accidental credential disclosure.

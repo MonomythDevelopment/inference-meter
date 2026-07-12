@@ -1,0 +1,78 @@
+name: Bug report
+description: Report a reproducible problem with InferenceMeter
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Search existing issues first. Do not attach credentials, Keychain exports, `auth.json`, authorization headers, prompts, or unsanitized rollout files.
+  - type: input
+    id: inference_meter_version
+    attributes:
+      label: InferenceMeter version
+      placeholder: 0.1.2
+    validations:
+      required: true
+  - type: input
+    id: macos_version
+    attributes:
+      label: macOS version
+      placeholder: 15.5
+    validations:
+      required: true
+  - type: input
+    id: cli_versions
+    attributes:
+      label: CLI versions
+      description: Include the Claude Code and/or Codex version involved.
+      placeholder: Claude Code x.y.z; Codex x.y.z
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Affected provider
+      options:
+        - Claude Code
+        - Codex
+        - Both
+        - App or UI only
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Launch InferenceMeter
+        2. Open the menu bar popover
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized_context
+    attributes:
+      label: Sanitized context
+      description: Add screenshots or sanitized diagnostic details only. Remove account data, prompts, tokens, headers, and session content.
+    validations:
+      required: false
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checks
+      options:
+        - label: I searched for an existing issue.
+          required: true
+        - label: I verified that this report contains no credentials, authorization headers, prompts, or unsanitized CLI files.
+          required: true
+        - label: This is not a private security report. I will follow SECURITY.md if credential exposure may be involved.
+          required: true

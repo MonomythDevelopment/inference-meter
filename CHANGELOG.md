@@ -4,6 +4,12 @@ All notable changes to InferenceMeter are documented here. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- MIT licensing and Monomyth Development project identity.
+- Public contribution, security, support, and conduct policies.
+- GitHub issue forms, pull request guidance, and macOS CI.
+
 ## [0.1.2] - 2026-07-12
 
 First public release candidate.
