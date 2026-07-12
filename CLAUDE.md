@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code when working in this repository. Read `AGENTS.md` first; it contains the authoritative repository workflow and security constraints.
 
+## Open source
+
+This is the public Monomyth Development repository (`MonomythDevelopment/inference-meter`), MIT licensed, with a sanitized history. Everything committed here is public: never commit secrets, personal paths, machine-specific environment details, or unsanitized provider captures.
+
+- Bundle identifier is `dev.monomyth.InferenceMeter`; version and build numbers live in `project.yml`, not the generated project.
+- GitHub Actions CI (`.github/workflows/ci.yml`) runs `make test` and `make build` on macOS 15 for every push to `main` and every PR; `main` is protected, so keep it green.
+- `CHANGELOG.md` follows Keep a Changelog / SemVer — add an `[Unreleased]` entry for user-facing changes.
+- Community policy files (`CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`) and GitHub issue/PR templates are in place; releases follow `docs/OPEN_SOURCE_RELEASE_CHECKLIST.md`.
+- v0.1.2 shipped as a source-only release; attaching a signed, notarized binary is blocked on Monomyth Apple distribution credentials.
+
 ## Build and test
 
 InferenceMeter is a Swift 6 / SwiftUI macOS 15 menu bar app. XcodeGen generates `InferenceMeter.xcodeproj` from `project.yml`, so the generated project is disposable and must not be committed.
