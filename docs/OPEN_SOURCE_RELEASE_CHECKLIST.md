@@ -16,19 +16,19 @@ Use this checklist before changing the repository from private to public.
 
 ## GitHub settings
 
-- [ ] Enable private vulnerability reporting.
+- [x] Enable private vulnerability reporting.
 - [x] Add the repository description, homepage, and topics.
-- [ ] Protect `main` and require the `Test and build` CI check.
+- [x] Protect `main` and require the `Test and build` CI check.
 - [x] Confirm issue labels referenced by the forms exist (`bug` and `enhancement`).
 - [x] Keep Discussions disabled for the initial release; use focused issue forms for support and proposals.
-- [ ] Change repository visibility to public only after every blocking item is complete.
+- [x] Publish the sanitized canonical repository while retaining legacy pull-request refs in a private archive.
 
 ## Source release
 
 - [x] Confirm `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
 - [x] Run `make test` and `make build` from a clean checkout.
 - [x] Build and verify a local ad-hoc universal archive to validate the release script.
-- [ ] Create the `v0.1.2` tag and GitHub source release.
+- [x] Create the `v0.1.2` tag and GitHub source release.
 
 ## Signed binary distribution
 
