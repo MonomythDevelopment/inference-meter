@@ -10,6 +10,7 @@ Use this checklist before changing the repository from private to public.
 - [x] Add contribution, support, conduct, and security policies.
 - [x] Add issue forms, a pull request template, and read-only CI permissions.
 - [x] Replace the pre-public bundle identifier with `dev.monomyth.InferenceMeter`.
+- [x] Scan the current tree and complete Git history with Gitleaks, narrowly documenting the historical public OAuth client metadata false positive.
 - [ ] Review the complete Git history and decide whether non-secret local environment metadata warrants a history rewrite. Complete any rewrite before accepting public forks.
 
 ## GitHub settings
