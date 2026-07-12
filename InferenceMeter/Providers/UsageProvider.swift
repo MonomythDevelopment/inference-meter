@@ -1,11 +1,11 @@
 protocol UsageProvider: Sendable {
     var provider: Provider { get }
     func refresh() async -> Usage
-    func reauthenticate() async
+    func reauthenticate() async -> Bool
 }
 
 extension UsageProvider {
-    func reauthenticate() async {
-        // Real token refresh is wired by the authentication provider work.
+    func reauthenticate() async -> Bool {
+        false
     }
 }

@@ -13,6 +13,7 @@ enum UsageSource: Sendable {
 enum UsageState: Sendable {
     case ok
     case stale
+    case refreshRequired
     case unauthorized
     case unavailable
 }

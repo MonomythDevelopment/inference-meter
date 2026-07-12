@@ -65,7 +65,7 @@ func windowResetRearmsSentThresholds() async {
 func nonOkStatesDoNotPostOrCorruptMarkers() async {
     let fixture = NotifierFixture()
 
-    for state in [UsageState.stale, .unauthorized, .unavailable] {
+    for state in [UsageState.stale, .refreshRequired, .unauthorized, .unavailable] {
         await fixture.notifier.evaluate(
             state: fixture.state(codexFiveHourPct: 96, codexState: state)
         )

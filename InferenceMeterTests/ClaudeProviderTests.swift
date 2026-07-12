@@ -120,6 +120,56 @@ func claudeProviderMapsAuthFailuresToUnauthorized() async {
     }
 }
 
+@Test("ClaudeProvider distinguishes an expired refreshable access token from logout")
+func claudeProviderDistinguishesExpiredRefreshableAccessTokenFromLogout() async throws {
+    let parsedAt = Date(timeIntervalSince1970: 1_800_001_100)
+    let usageURL = makeEndpointURL()
+    let provider = ClaudeProvider(
+        keychain: keychainReturningCredential(
+            accessToken: "expired-access-token",
+            refreshToken: "refresh-token",
+            expiresAt: parsedAt.addingTimeInterval(-1).timeIntervalSince1970 * 1_000,
+            refreshTokenExpiresAt: parsedAt.addingTimeInterval(3_600).timeIntervalSince1970 * 1_000
+        ),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        session: makeStubbedSession(for: usageURL) { _ in
+            HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+        },
+        now: { parsedAt }
+    )
+
+    let usage = await provider.refresh()
+
+    #expect(usage.state == .refreshRequired)
+}
+
+@Test("ClaudeProvider treats an expired refresh token as signed out")
+func claudeProviderTreatsExpiredRefreshTokenAsSignedOut() async throws {
+    let parsedAt = Date(timeIntervalSince1970: 1_800_001_100)
+    let usageURL = makeEndpointURL()
+    let provider = ClaudeProvider(
+        keychain: keychainReturningCredential(
+            accessToken: "expired-access-token",
+            refreshToken: "expired-refresh-token",
+            expiresAt: parsedAt.addingTimeInterval(-10).timeIntervalSince1970 * 1_000,
+            refreshTokenExpiresAt: parsedAt.addingTimeInterval(-1).timeIntervalSince1970 * 1_000
+        ),
+        credentialService: "unit-test-service",
+        credentialAccount: "unit-test-account",
+        usageURL: usageURL,
+        session: makeStubbedSession(for: usageURL) { _ in
+            HTTPStubResponse(data: Data("{}".utf8), statusCode: 401)
+        },
+        now: { parsedAt }
+    )
+
+    let usage = await provider.refresh()
+
+    #expect(usage.state == .unauthorized)
+}
+
 @Test("ClaudeProvider maps missing Keychain credential to unauthorized")
 func claudeProviderMapsMissingKeychainCredentialToUnauthorized() async {
     let parsedAt = Date(timeIntervalSince1970: 1_800_001_200)
@@ -320,11 +370,12 @@ func claudeProviderReauthenticationDoesNotRefreshUnchangedCredential() async thr
     )
 
     let firstUsage = await provider.refresh()
-    await provider.reauthenticate()
+    let didAdoptCredential = await provider.reauthenticate()
     let retryUsage = await provider.refresh()
 
     #expect(firstUsage.state == .unauthorized)
     #expect(retryUsage.state == .unauthorized)
+    #expect(!didAdoptCredential)
     #expect(await usageRequests.requests.count == 2)
     #expect(await tokenRequests.requests.isEmpty)
 }
@@ -334,6 +385,7 @@ func claudeProviderAdoptsRotatedKeychainTokenWithoutNetworkRefresh() async throw
     let usageURL = makeEndpointURL()
     let tokenURL = makeTokenURL()
     let tokenRequests = RequestLog()
+    let refreshInvocations = RefreshInvocationRecorder()
     let keychainSequence = CredentialSequence([
         try claudeCredentialData(accessToken: "expired-access-token", refreshToken: "refresh-token"),
         try claudeCredentialData(accessToken: "rotated-access-token", refreshToken: "refresh-token")
@@ -357,16 +409,21 @@ func claudeProviderAdoptsRotatedKeychainTokenWithoutNetworkRefresh() async throw
         credentialService: "unit-test-service",
         credentialAccount: "unit-test-account",
         usageURL: usageURL,
-        session: session
+        session: session,
+        credentialOwnerRefresher: ClaudeCredentialOwnerRefresher {
+            await refreshInvocations.record()
+        }
     )
 
     let firstUsage = await provider.refresh()
-    await provider.reauthenticate()
+    let didAdoptCredential = await provider.reauthenticate()
     let retryUsage = await provider.refresh()
 
     #expect(firstUsage.state == .unauthorized)
     #expect(retryUsage.state == .ok)
+    #expect(didAdoptCredential)
     #expect(keychainSequence.readCount == 3)
+    #expect(await refreshInvocations.count == 1)
     #expect(await tokenRequests.requests.isEmpty)
 }
 
@@ -394,11 +451,12 @@ func claudeProviderUnchangedCredentialLeavesRetryUnauthorized() async throws {
     )
 
     let firstUsage = await provider.refresh()
-    await provider.reauthenticate()
+    let didAdoptCredential = await provider.reauthenticate()
     let retryUsage = await provider.refresh()
 
     #expect(firstUsage.state == .unauthorized)
     #expect(retryUsage.state == .unauthorized)
+    #expect(!didAdoptCredential)
     #expect(await tokenRequests.requests.isEmpty)
 }
 
@@ -425,6 +483,14 @@ private actor RequestLog {
     func append(_ request: URLRequest) {
         requests.append(request)
         bodies.append(httpBodyData(from: request))
+    }
+}
+
+private actor RefreshInvocationRecorder {
+    private(set) var count = 0
+
+    func record() {
+        count += 1
     }
 }
 
@@ -541,6 +607,8 @@ private func makeStubbedSession(
 private func keychainReturningCredential(
     accessToken: String = "unit-test-access-token",
     refreshToken: String? = nil,
+    expiresAt: Double? = nil,
+    refreshTokenExpiresAt: Double? = nil,
     clientID: String? = nil,
     scopes: [String]? = nil
 ) -> Keychain {
@@ -548,6 +616,8 @@ private func keychainReturningCredential(
         try claudeCredentialData(
             accessToken: accessToken,
             refreshToken: refreshToken,
+            expiresAt: expiresAt,
+            refreshTokenExpiresAt: refreshTokenExpiresAt,
             clientID: clientID,
             scopes: scopes
         )
@@ -591,6 +661,8 @@ private final class CredentialSequence: @unchecked Sendable {
 private func claudeCredentialData(
     accessToken: String,
     refreshToken: String? = nil,
+    expiresAt: Double? = nil,
+    refreshTokenExpiresAt: Double? = nil,
     clientID: String? = nil,
     scopes: [String]? = nil
 ) throws -> Data {
@@ -599,6 +671,8 @@ private func claudeCredentialData(
             claudeAiOauth: ClaudeCredentialFixture.OAuth(
                 accessToken: accessToken,
                 refreshToken: refreshToken,
+                expiresAt: expiresAt,
+                refreshTokenExpiresAt: refreshTokenExpiresAt,
                 clientID: clientID,
                 scopes: scopes
             )
@@ -612,12 +686,16 @@ private struct ClaudeCredentialFixture: Encodable {
     struct OAuth: Encodable {
         var accessToken: String
         var refreshToken: String?
+        var expiresAt: Double?
+        var refreshTokenExpiresAt: Double?
         var clientID: String?
         var scopes: [String]?
 
         enum CodingKeys: String, CodingKey {
             case accessToken
             case refreshToken
+            case expiresAt
+            case refreshTokenExpiresAt
             case clientID = "clientId"
             case scopes
         }

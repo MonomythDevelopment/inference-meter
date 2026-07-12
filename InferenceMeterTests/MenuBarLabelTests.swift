@@ -83,6 +83,20 @@ func staleProvidersKeepValuesVisibleInSecondaryGray() {
     #expect(compactSegments[4].color == Color(.systemRed))
 }
 
+@Test("Refresh-required providers preserve prior values or show a renewal marker")
+func refreshRequiredProvidersPreserveValuesOrShowRenewalMarker() {
+    let segments = labelSegments(
+        claude: usage(provider: .claude, fiveHourPct: 45, weeklyPct: 70, state: .refreshRequired),
+        codex: usage(provider: .codex, fiveHourPct: nil, weeklyPct: nil, state: .refreshRequired),
+        compact: false
+    )
+
+    #expect(segmentText(segments) == "✳ 45·70  ⬡ ↻")
+    #expect(segments[1].color == .secondary)
+    #expect(segments[3].color == .secondary)
+    #expect(segments.last == MenuBarLabelSegment(text: "↻", color: Color(.systemOrange)))
+}
+
 @Test("Unauthorized providers render auth markers in full and compact modes")
 func unauthorizedProvidersRenderAuthMarkersInFullAndCompactModes() {
     let fullSegments = labelSegments(

@@ -61,6 +61,8 @@ final class SystemRefreshClock: RefreshClock {
 struct RefreshEngineConfiguration {
     var pollInterval: TimeInterval = 60
     var staleAfter: TimeInterval = 300
+    var staleAfterOverrides: [Provider: TimeInterval] = [.claude: 900]
+    var minimumRefreshIntervals: [Provider: TimeInterval] = [.claude: 300]
     var fileSystemCoalescingWindow: TimeInterval = 2
     var watchedDirectories: [Provider: URL] = Self.defaultWatchedDirectories()
 
@@ -68,7 +70,6 @@ struct RefreshEngineConfiguration {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> [Provider: URL] {
         [
-            .claude: homeDirectory.appendingPathComponent(".claude", isDirectory: true),
             .codex: homeDirectory
                 .appendingPathComponent(".codex", isDirectory: true)
                 .appendingPathComponent("sessions", isDirectory: true)
@@ -222,16 +223,23 @@ final class RefreshEngine {
         }
 
         inFlightProviders.insert(providerID)
+        refreshState[providerID, default: ProviderRefreshState()].recordAttempt(now: clock.now)
         defer {
             inFlightProviders.remove(providerID)
         }
 
         let firstUsage = await provider.refresh()
 
-        if firstUsage.state == .unauthorized {
-            await provider.reauthenticate()
+        if firstUsage.state == .unauthorized || firstUsage.state == .refreshRequired {
+            let didAdoptCredential = await provider.reauthenticate()
+
+            guard didAdoptCredential else {
+                await applyRefreshResult(firstUsage)
+                return
+            }
+
             let retryUsage = await provider.refresh()
-            await applyRefreshResult(retryUsage.state == .ok ? retryUsage : markedUnauthorized(provider: providerID))
+            await applyRefreshResult(retryUsage)
             return
         }
 
@@ -243,8 +251,9 @@ final class RefreshEngine {
             let usage = appState.usage(for: provider)
 
             guard usage.state != .unauthorized,
+                  usage.state != .refreshRequired,
                   let updatedAt = usage.updatedAt,
-                  clock.now.timeIntervalSince(updatedAt) >= configuration.staleAfter else {
+                  clock.now.timeIntervalSince(updatedAt) >= staleAfter(for: provider) else {
                 continue
             }
 
@@ -253,12 +262,10 @@ final class RefreshEngine {
     }
 
     func nextAttemptDelay(for provider: Provider) -> TimeInterval? {
-        guard let state = refreshState[provider],
-              state.nextAllowedAt > clock.now else {
-            return nil
-        }
-
-        return state.nextAllowedAt.timeIntervalSince(clock.now)
+        refreshState[provider]?.nextAttemptDelay(
+            now: clock.now,
+            minimumRefreshInterval: minimumRefreshInterval(for: provider)
+        )
     }
 
     func currentBackoffDelay(for provider: Provider) -> TimeInterval {
@@ -312,31 +319,39 @@ private extension RefreshEngine {
     }
 
     func shouldAttemptRefresh(provider: Provider, bypassingBackoff: Bool) -> Bool {
-        if bypassingBackoff {
-            return true
-        }
-
         guard let state = refreshState[provider] else {
             return true
         }
 
-        return clock.now >= state.nextAllowedAt
+        return state.canAttempt(
+            now: clock.now,
+            minimumRefreshInterval: minimumRefreshInterval(for: provider),
+            bypassingBackoff: bypassingBackoff
+        )
     }
 
     func applyRefreshResult(_ usage: Usage) async {
         switch usage.state {
         case .ok:
             await applySuccessfulRefresh(usage)
+        case .refreshRequired:
+            applyFailedRefresh(usage, state: .refreshRequired)
         case .unauthorized:
             let previousUsage = appState.usage(for: usage.provider)
-            if previousUsage.fiveHourPct != nil || previousUsage.weeklyPct != nil {
+            if hasUsageValues(previousUsage) {
                 // The CLI owns token refresh; keep last-known usage visible during transient expiry.
-                applyFailedRefresh(provider: usage.provider, state: .stale)
+                applyFailedRefresh(usage, state: .stale)
             } else {
-                applyFailedRefresh(provider: usage.provider, state: .unauthorized)
+                applyFailedRefresh(usage, state: .unauthorized)
             }
-        case .stale, .unavailable:
-            applyFailedRefresh(provider: usage.provider, state: .unavailable)
+        case .stale:
+            applyFailedRefresh(usage, state: .stale)
+        case .unavailable:
+            let previousUsage = appState.usage(for: usage.provider)
+            applyFailedRefresh(
+                usage,
+                state: hasUsageValues(previousUsage) ? previousUsage.state : .unavailable
+            )
         }
     }
 
@@ -348,14 +363,23 @@ private extension RefreshEngine {
         await notifier?.evaluate(state: appState)
     }
 
-    func applyFailedRefresh(provider: Provider, state: UsageState) {
-        let previousUsage = appState.usage(for: provider)
-        appState.setUsage(previousUsage.replacingState(state))
-        refreshState[provider, default: ProviderRefreshState()].recordFailure(now: clock.now)
+    func applyFailedRefresh(_ usage: Usage, state: UsageState) {
+        let previousUsage = appState.usage(for: usage.provider)
+        let displayedUsage = hasUsageValues(previousUsage) ? previousUsage : usage
+        appState.setUsage(displayedUsage.replacingState(state))
+        refreshState[usage.provider, default: ProviderRefreshState()].recordFailure(now: clock.now)
     }
 
-    func markedUnauthorized(provider: Provider) -> Usage {
-        appState.usage(for: provider).replacingState(.unauthorized)
+    func hasUsageValues(_ usage: Usage) -> Bool {
+        usage.fiveHourPct != nil || usage.weeklyPct != nil
+    }
+
+    func minimumRefreshInterval(for provider: Provider) -> TimeInterval {
+        configuration.minimumRefreshIntervals[provider] ?? 0
+    }
+
+    func staleAfter(for provider: Provider) -> TimeInterval {
+        configuration.staleAfterOverrides[provider] ?? configuration.staleAfter
     }
 }
 
@@ -366,7 +390,12 @@ private struct ProviderRefreshState {
     private static let maxBackoff: TimeInterval = 900
 
     var nextAllowedAt: Date = .distantPast
+    var lastAttemptAt: Date?
     var nextFailureBackoff: TimeInterval = Self.baseBackoff
+
+    mutating func recordAttempt(now: Date) {
+        lastAttemptAt = now
+    }
 
     mutating func recordSuccess() {
         nextAllowedAt = .distantPast
@@ -376,6 +405,30 @@ private struct ProviderRefreshState {
     mutating func recordFailure(now: Date) {
         nextAllowedAt = now.addingTimeInterval(nextFailureBackoff)
         nextFailureBackoff = Self.backoff(after: nextFailureBackoff)
+    }
+
+    func canAttempt(
+        now: Date,
+        minimumRefreshInterval: TimeInterval,
+        bypassingBackoff: Bool
+    ) -> Bool {
+        if let lastAttemptAt,
+           now < lastAttemptAt.addingTimeInterval(minimumRefreshInterval) {
+            return false
+        }
+
+        return bypassingBackoff || now >= nextAllowedAt
+    }
+
+    func nextAttemptDelay(now: Date, minimumRefreshInterval: TimeInterval) -> TimeInterval? {
+        let rateLimitDate = lastAttemptAt?.addingTimeInterval(minimumRefreshInterval) ?? .distantPast
+        let nextAttemptAt = max(nextAllowedAt, rateLimitDate)
+
+        guard nextAttemptAt > now else {
+            return nil
+        }
+
+        return nextAttemptAt.timeIntervalSince(now)
     }
 
     private static func backoff(after interval: TimeInterval) -> TimeInterval {

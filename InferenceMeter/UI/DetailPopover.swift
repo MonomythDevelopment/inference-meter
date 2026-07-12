@@ -267,6 +267,11 @@ private struct ProviderUsageSection: View {
                         .font(.caption)
                         .foregroundStyle(Color(.systemOrange))
                         .fixedSize(horizontal: false, vertical: true)
+                } else if usage.state == .refreshRequired {
+                    Text("Open \(configuration.signInName) and run a command to renew the session, then Refresh")
+                        .font(.caption)
+                        .foregroundStyle(Color(.systemOrange))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -335,7 +340,7 @@ private struct UsageWindowRow: View {
 
     private var hidesUsageValues: Bool {
         switch state {
-        case .ok, .stale:
+        case .ok, .stale, .refreshRequired:
             false
         case .unauthorized, .unavailable:
             true
@@ -389,6 +394,8 @@ private struct StatusBadge: View {
             "OK"
         case .stale:
             "Stale"
+        case .refreshRequired:
+            "Session refresh needed"
         case .unauthorized:
             "Sign in required"
         case .unavailable:
@@ -400,7 +407,7 @@ private struct StatusBadge: View {
         switch state {
         case .ok:
             Color(.systemGreen)
-        case .stale, .unauthorized:
+        case .stale, .refreshRequired, .unauthorized:
             Color(.systemOrange)
         case .unavailable:
             .secondary

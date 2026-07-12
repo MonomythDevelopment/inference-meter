@@ -55,9 +55,9 @@ struct CodexProvider: UsageProvider {
         return localUsage
     }
 
-    func reauthenticate() async {
+    func reauthenticate() async -> Bool {
         guard endpointConfiguration != nil else {
-            return
+            return false
         }
 
         // Read-only monitor: never perform an OAuth refresh_token exchange. OpenAI
@@ -65,9 +65,9 @@ struct CodexProvider: UsageProvider {
         // Codex CLI stores in ~/.codex/auth.json and force the CLI to re-login. We only
         // adopt a token the CLI itself has already refreshed on disk.
         guard let authSnapshot = try? readAuthTokenSnapshot() else {
-            return
+            return false
         }
-        _ = await tokenStore.adoptOwnerTokenIfChanged(authSnapshot.ownerSnapshot)
+        return await tokenStore.adoptOwnerTokenIfChanged(authSnapshot.ownerSnapshot)
     }
 }
 
@@ -163,6 +163,7 @@ private extension CodexProvider {
 
         var offset = try fileHandle.seekToEnd()
         var pendingPrefix = Data()
+        var accumulator = CodexUsageAccumulator()
 
         while offset > 0 {
             let readSize = min(Self.chunkSize, Int(offset))
@@ -183,11 +184,14 @@ private extension CodexProvider {
                 : buffer.index(after: firstNewlineIndex)
             let completeData = buffer[completeStart..<buffer.endIndex]
 
-            if let usage = lastRateLimitsUsage(
+            mergeRateLimitsUsage(
                 inCompleteLines: completeData,
-                fileModificationDate: fileModificationDate
-            ) {
-                return usage
+                fileModificationDate: fileModificationDate,
+                accumulator: &accumulator
+            )
+
+            if accumulator.isComplete {
+                return accumulator.usage
             }
 
             pendingPrefix = offset == 0
@@ -195,24 +199,28 @@ private extension CodexProvider {
                 : Data(buffer[buffer.startIndex..<firstNewlineIndex])
         }
 
-        guard !pendingPrefix.isEmpty else {
-            return nil
+        if !pendingPrefix.isEmpty,
+           let usage = usage(fromCandidateLine: pendingPrefix, fileModificationDate: fileModificationDate) {
+            accumulator.merge(usage)
         }
 
-        return usage(fromCandidateLine: pendingPrefix, fileModificationDate: fileModificationDate)
+        return accumulator.usage
     }
 
-    func lastRateLimitsUsage(
+    func mergeRateLimitsUsage(
         inCompleteLines linesData: Data.SubSequence,
-        fileModificationDate: Date
-    ) -> Usage? {
+        fileModificationDate: Date,
+        accumulator: inout CodexUsageAccumulator
+    ) {
         for line in linesData.split(separator: Self.newlineByte, omittingEmptySubsequences: true).reversed() {
             if let usage = usage(fromCandidateLine: Data(line), fileModificationDate: fileModificationDate) {
-                return usage
+                accumulator.merge(usage)
+
+                if accumulator.isComplete {
+                    return
+                }
             }
         }
-
-        return nil
     }
 
     func usage(fromCandidateLine lineData: Data, fileModificationDate: Date) -> Usage? {
@@ -366,6 +374,79 @@ private extension CodexProvider {
             source: source,
             state: .unauthorized
         )
+    }
+}
+
+private struct CodexUsageAccumulator {
+    private static let untimestampedWindowMergeHorizon: TimeInterval = 300
+
+    private var fiveHourPct: Double?
+    private var weeklyPct: Double?
+    private var fiveHourResetsAt: Date?
+    private var weeklyResetsAt: Date?
+    private var updatedAt: Date?
+    private var source: UsageSource = .localFile
+
+    var isComplete: Bool {
+        fiveHourPct != nil && weeklyPct != nil
+    }
+
+    var usage: Usage? {
+        guard fiveHourPct != nil || weeklyPct != nil else {
+            return nil
+        }
+
+        return Usage(
+            provider: .codex,
+            fiveHourPct: fiveHourPct,
+            weeklyPct: weeklyPct,
+            fiveHourResetsAt: fiveHourResetsAt,
+            weeklyResetsAt: weeklyResetsAt,
+            updatedAt: updatedAt,
+            source: source,
+            state: .ok
+        )
+    }
+
+    mutating func merge(_ usage: Usage) {
+        if updatedAt == nil {
+            updatedAt = usage.updatedAt
+            source = usage.source
+        }
+
+        if fiveHourPct == nil,
+           let percentage = usage.fiveHourPct,
+           isCurrentWindow(resetsAt: usage.fiveHourResetsAt, observedAt: usage.updatedAt) {
+            fiveHourPct = percentage
+            fiveHourResetsAt = usage.fiveHourResetsAt
+        }
+
+        if weeklyPct == nil,
+           let percentage = usage.weeklyPct,
+           isCurrentWindow(resetsAt: usage.weeklyResetsAt, observedAt: usage.updatedAt) {
+            weeklyPct = percentage
+            weeklyResetsAt = usage.weeklyResetsAt
+        }
+    }
+
+    private func isCurrentWindow(resetsAt: Date?, observedAt: Date?) -> Bool {
+        guard let updatedAt else {
+            return true
+        }
+
+        if observedAt == updatedAt {
+            return true
+        }
+
+        if let resetsAt {
+            return resetsAt > updatedAt
+        }
+
+        guard let observedAt else {
+            return true
+        }
+
+        return updatedAt.timeIntervalSince(observedAt) <= Self.untimestampedWindowMergeHorizon
     }
 }
 

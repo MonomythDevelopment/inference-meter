@@ -61,6 +61,12 @@ private func providerSegments(symbol: String, usage: Usage, compact: Bool) -> [M
         segments.append(contentsOf: valueSegments(usage: usage, colorOverride: nil, compact: compact))
     case .stale:
         segments.append(contentsOf: valueSegments(usage: usage, colorOverride: .secondary, compact: compact))
+    case .refreshRequired:
+        if usage.fiveHourPct != nil || usage.weeklyPct != nil {
+            segments.append(contentsOf: valueSegments(usage: usage, colorOverride: .secondary, compact: compact))
+        } else {
+            segments.append(MenuBarLabelSegment(text: "↻", color: Color(.systemOrange)))
+        }
     case .unauthorized:
         segments.append(MenuBarLabelSegment(text: "!", color: Color(.systemOrange)))
     case .unavailable:

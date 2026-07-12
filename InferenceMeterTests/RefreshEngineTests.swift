@@ -111,8 +111,8 @@ func failedRefreshDoesNotEvaluateNotifier() async {
 }
 
 @MainActor
-@Test("Per-provider backoff state is independent")
-func perProviderBackoffStateIsIndependent() async {
+@Test("Per-provider backoff and minimum refresh intervals are independent")
+func perProviderBackoffAndMinimumRefreshIntervalsAreIndependent() async {
     let clock = TestRefreshClock()
     let codexProvider = ScriptedUsageProvider(
         provider: .codex,
@@ -136,9 +136,37 @@ func perProviderBackoffStateIsIndependent() async {
     await engine.handleTimerTick()
 
     #expect(await codexProvider.refreshCallCount == 1)
-    #expect(await claudeProvider.refreshCallCount == 2)
+    #expect(await claudeProvider.refreshCallCount == 1)
     #expect(engine.nextAttemptDelay(for: .codex) == 60)
-    #expect(engine.nextAttemptDelay(for: .claude) == nil)
+    #expect(engine.nextAttemptDelay(for: .claude) == 300)
+}
+
+@MainActor
+@Test("Claude refresh attempts stay throttled even when backoff is bypassed")
+func claudeRefreshAttemptsStayThrottledWhenBackoffIsBypassed() async {
+    let clock = TestRefreshClock()
+    let provider = ScriptedUsageProvider(
+        provider: .claude,
+        responses: [
+            usage(provider: .claude, fiveHourPct: 10, weeklyPct: 20, updatedAt: clock.now),
+            usage(provider: .claude, fiveHourPct: 11, weeklyPct: 21, updatedAt: clock.now)
+        ]
+    )
+    let engine = RefreshEngine(
+        appState: AppState(),
+        providers: [provider],
+        clock: clock,
+        configuration: testConfiguration()
+    )
+
+    await engine.refresh(provider: .claude, bypassingBackoff: true)
+    clock.advance(by: 299)
+    await engine.refresh(provider: .claude, bypassingBackoff: true)
+    #expect(await provider.refreshCallCount == 1)
+
+    clock.advance(by: 1)
+    await engine.refresh(provider: .claude, bypassingBackoff: true)
+    #expect(await provider.refreshCallCount == 2)
 }
 
 @MainActor
@@ -164,7 +192,38 @@ func failedRefreshKeepsLastKnownUsageValues() async {
     #expect(appState.codex.fiveHourPct == 42)
     #expect(appState.codex.weeklyPct == 58)
     #expect(appState.codex.updatedAt == previousUsage.updatedAt)
-    #expect(appState.codex.state == .unavailable)
+    #expect(appState.codex.state == .ok)
+}
+
+@MainActor
+@Test("Claude data remains fresh through a transient failure until its stale threshold")
+func claudeDataRemainsFreshThroughTransientFailureUntilStaleThreshold() async {
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    let clock = TestRefreshClock(now: start)
+    let appState = AppState(
+        claude: usage(provider: .claude, fiveHourPct: 14, weeklyPct: 28, updatedAt: start)
+    )
+    let provider = ScriptedUsageProvider(
+        provider: .claude,
+        responses: [.unavailable(provider: .claude)]
+    )
+    let engine = RefreshEngine(
+        appState: appState,
+        providers: [provider],
+        clock: clock,
+        configuration: testConfiguration()
+    )
+
+    await engine.refresh(provider: .claude, bypassingBackoff: true)
+    #expect(appState.claude.state == .ok)
+
+    clock.advance(by: 899)
+    engine.evaluateStaleness()
+    #expect(appState.claude.state == .ok)
+
+    clock.advance(by: 1)
+    engine.evaluateStaleness()
+    #expect(appState.claude.state == .stale)
 }
 
 @MainActor
@@ -253,6 +312,38 @@ func persistentUnauthorizedWithNoPriorDataLandsUnauthorized() async {
     #expect(appState.codex.state == .unauthorized)
     #expect(appState.codex.fiveHourPct == nil)
     #expect(appState.codex.weeklyPct == nil)
+}
+
+@MainActor
+@Test("Unchanged owner credential skips a pointless unauthorized retry")
+func unchangedOwnerCredentialSkipsUnauthorizedRetry() async {
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    let provider = ScriptedUsageProvider(
+        provider: .claude,
+        responses: [
+            usage(
+                provider: .claude,
+                fiveHourPct: nil,
+                weeklyPct: nil,
+                updatedAt: start,
+                state: .refreshRequired
+            )
+        ],
+        reauthenticationResult: false
+    )
+    let appState = AppState()
+    let engine = RefreshEngine(
+        appState: appState,
+        providers: [provider],
+        clock: TestRefreshClock(now: start),
+        configuration: testConfiguration()
+    )
+
+    await engine.refresh(provider: .claude, bypassingBackoff: true)
+
+    #expect(await provider.refreshCallCount == 1)
+    #expect(await provider.reauthenticateCallCount == 1)
+    #expect(appState.claude.state == .refreshRequired)
 }
 
 @MainActor
@@ -360,12 +451,14 @@ func fileSystemWatcherObservesNestedFileChanges() async throws {
 private actor ScriptedUsageProvider: UsageProvider {
     nonisolated let provider: Provider
     private var responses: [Usage]
+    private let reauthenticationResult: Bool
     private(set) var refreshCallCount = 0
     private(set) var reauthenticateCallCount = 0
 
-    init(provider: Provider, responses: [Usage]) {
+    init(provider: Provider, responses: [Usage], reauthenticationResult: Bool = true) {
         self.provider = provider
         self.responses = responses
+        self.reauthenticationResult = reauthenticationResult
     }
 
     func refresh() async -> Usage {
@@ -378,8 +471,9 @@ private actor ScriptedUsageProvider: UsageProvider {
         return responses.removeFirst()
     }
 
-    func reauthenticate() async {
+    func reauthenticate() async -> Bool {
         reauthenticateCallCount += 1
+        return reauthenticationResult
     }
 }
 

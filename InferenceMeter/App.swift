@@ -20,7 +20,7 @@ struct InferenceMeterApp: App {
             ]
         } else {
             [
-                ClaudeProvider(),
+                ClaudeProvider(credentialOwnerRefresher: .live),
                 CodexProvider()
             ]
         }

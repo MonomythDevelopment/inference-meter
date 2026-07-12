@@ -50,10 +50,17 @@ InferenceMeter is a strictly **read-only** monitor. It reads the credentials the
 Codex CLIs already store on this machine — the `Claude Code-credentials` item in the macOS Keychain
 and `~/.codex/auth.json` — and calls the providers' usage endpoints with the current access token.
 
-It **never refreshes those tokens and never writes them back.** Each CLI's refresh token is rotated
-on use, so refreshing it here would invalidate the CLI's own copy and force you to log in again;
-InferenceMeter deliberately avoids this and simply adopts a newer token whenever a CLI writes one.
-Token, credential, and header values are never printed.
+It **never sends a refresh-token request and never writes credentials.** Each CLI's refresh token is
+rotated on use, so refreshing it directly here would invalidate the CLI's own copy and force you to
+log in again. When Claude's access token expires, InferenceMeter asks the installed Claude Code CLI
+to inspect its own auth state, then adopts the newer Keychain token only if Claude Code renewed it.
+Codex credentials remain entirely file-observed. Token, credential, and header values are never
+printed.
+
+Claude endpoint requests are limited to one attempt every five minutes and use exponential backoff
+after failures. Transient endpoint failures keep the last successful values visible; Claude data is
+marked stale only after fifteen minutes without a successful refresh. Codex continues to update from
+session-file events and merges sparse rate-limit snapshots by their declared window duration.
 
 The first live Claude refresh reads the Keychain credential, so macOS may show a one-time permission
 prompt for `Claude Code-credentials`; choose "Always Allow" to let InferenceMeter read future usage

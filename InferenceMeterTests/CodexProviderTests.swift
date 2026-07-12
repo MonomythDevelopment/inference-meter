@@ -69,6 +69,48 @@ func codexProviderTailScanSelectsLastRateLimitEvent() async throws {
     }
 }
 
+@Test("CodexProvider merges sparse CLI rate-limit updates by window duration")
+func codexProviderMergesSparseRateLimitUpdatesByWindowDuration() async throws {
+    try await withTemporaryHome { home in
+        try writeRollout(
+            home: home,
+            contents: """
+            {"timestamp":"2026-07-12T18:54:05.005Z","type":"event_msg","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":3.0,"window_minutes":300,"resets_at":1783897537},"secondary":{"used_percent":2.0,"window_minutes":10080,"resets_at":1784411864},"plan_type":"pro"}}}
+            {"timestamp":"2026-07-12T18:54:05.006Z","type":"event_msg","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":4.0,"window_minutes":10080,"resets_at":1784411864},"secondary":null,"plan_type":"pro"}}}
+            {"timestamp":"2026-07-12T18:54:06.000Z","type":"message","payload":{"text":"tail noise"}}
+            """
+        )
+
+        let usage = await CodexProvider(homeDirectory: home).refresh()
+
+        #expect(usage.state == .ok)
+        #expect(isClose(usage.fiveHourPct, to: 3))
+        #expect(isClose(usage.weeklyPct, to: 4))
+        #expect(usage.fiveHourResetsAt == Date(timeIntervalSince1970: 1_783_897_537))
+        #expect(usage.weeklyResetsAt == Date(timeIntervalSince1970: 1_784_411_864))
+        #expect(usage.updatedAt == isoDateWithFractionalSeconds("2026-07-12T18:54:05.006Z"))
+    }
+}
+
+@Test("CodexProvider does not merge an expired window from old sparse data")
+func codexProviderDoesNotMergeExpiredWindowFromOldSparseData() async throws {
+    try await withTemporaryHome { home in
+        try writeRollout(
+            home: home,
+            contents: """
+            {"timestamp":"2026-07-01T10:00:00Z","rate_limits":{"primary":{"used_percent":90.0,"window_minutes":300,"resets_at":1782900100}}}
+            {"timestamp":"2026-07-12T18:54:05Z","rate_limits":{"primary":{"used_percent":4.0,"window_minutes":10080,"resets_at":1784411864}}}
+            """
+        )
+
+        let usage = await CodexProvider(homeDirectory: home).refresh()
+
+        #expect(usage.state == .ok)
+        #expect(usage.fiveHourPct == nil)
+        #expect(isClose(usage.weeklyPct, to: 4))
+    }
+}
+
 @Test("CodexProvider parses rate limits nested inside a JSONL event payload")
 func codexProviderParsesNestedRateLimitPayload() async throws {
     try await withTemporaryHome { home in
@@ -648,6 +690,17 @@ private func rateLimitsLine(
 private func isoDate(_ value: String) -> Date {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime]
+
+    guard let date = formatter.date(from: value) else {
+        fatalError("Invalid test date: \(value)")
+    }
+
+    return date
+}
+
+private func isoDateWithFractionalSeconds(_ value: String) -> Date {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
     guard let date = formatter.date(from: value) else {
         fatalError("Invalid test date: \(value)")
