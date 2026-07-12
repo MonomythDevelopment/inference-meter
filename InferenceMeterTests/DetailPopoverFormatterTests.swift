@@ -5,7 +5,9 @@ import Testing
 @Test("Countdown formats future reset windows")
 func countdownFormatsFutureResetWindows() {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let resetsAt = now.addingTimeInterval((2 * 60 * 60) + (14 * 60))
+    let twoHours: TimeInterval = 2 * 60 * 60
+    let fourteenMinutes: TimeInterval = 14 * 60
+    let resetsAt = now.addingTimeInterval(twoHours + fourteenMinutes)
 
     #expect(countdownString(to: resetsAt, now: now) == "2h 14m")
 }
@@ -13,7 +15,10 @@ func countdownFormatsFutureResetWindows() {
 @Test("Countdown formats multi-day reset windows")
 func countdownFormatsMultiDayResetWindows() {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let resetsAt = now.addingTimeInterval((3 * 24 * 60 * 60) + (5 * 60 * 60) + (42 * 60))
+    let threeDays: TimeInterval = 3 * 24 * 60 * 60
+    let fiveHours: TimeInterval = 5 * 60 * 60
+    let fortyTwoMinutes: TimeInterval = 42 * 60
+    let resetsAt = now.addingTimeInterval(threeDays + fiveHours + fortyTwoMinutes)
 
     #expect(countdownString(to: resetsAt, now: now) == "3d 5h")
 }
