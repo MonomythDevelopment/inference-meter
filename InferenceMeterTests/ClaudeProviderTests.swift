@@ -37,6 +37,7 @@ func claudeProviderReturnsEndpointUsage() async throws {
     #expect(usage.state == .ok)
     #expect(isClose(usage.fiveHourPct, to: 15))
     #expect(isClose(usage.weeklyPct, to: 4))
+    #expect(isClose(usage.fablePct, to: 4))
     #expect(usage.updatedAt == parsedAt)
 }
 
@@ -233,7 +234,7 @@ func claudeProviderDoesNotEmitCredentialSentinelsDuringRefreshAndReauthenticate(
 
     let output = try await captureStandardOutput {
         firstUsage = await provider.refresh()
-        await provider.reauthenticate()
+        _ = await provider.reauthenticate()
         retryUsage = await provider.refresh()
     }
 

@@ -371,7 +371,7 @@ private extension RefreshEngine {
     }
 
     func hasUsageValues(_ usage: Usage) -> Bool {
-        usage.fiveHourPct != nil || usage.weeklyPct != nil
+        usage.fiveHourPct != nil || usage.weeklyPct != nil || usage.fablePct != nil
     }
 
     func minimumRefreshInterval(for provider: Provider) -> TimeInterval {
@@ -453,7 +453,9 @@ private extension Usage {
             weeklyResetsAt: weeklyResetsAt,
             updatedAt: updatedAt,
             source: source,
-            state: state
+            state: state,
+            fablePct: fablePct,
+            fableResetsAt: fableResetsAt
         )
     }
 }

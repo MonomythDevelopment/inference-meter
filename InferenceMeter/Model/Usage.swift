@@ -27,6 +27,8 @@ struct Usage: Sendable, Equatable {
     var updatedAt: Date?
     var source: UsageSource
     var state: UsageState
+    var fablePct: Double? = nil
+    var fableResetsAt: Date? = nil
 }
 
 extension Usage {

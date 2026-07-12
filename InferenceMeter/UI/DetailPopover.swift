@@ -243,6 +243,16 @@ private struct ProviderUsageSection: View {
                     state: usage.state,
                     now: now
                 )
+
+                if configuration.showsFableUsage {
+                    UsageWindowRow(
+                        title: "Fable",
+                        percentage: usage.fablePct,
+                        resetsAt: usage.fableResetsAt,
+                        state: usage.state,
+                        now: now
+                    )
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -419,16 +429,19 @@ private struct ProviderDisplayConfiguration {
     let glyph: String
     let name: String
     let signInName: String
+    let showsFableUsage: Bool
 
     static let claude = ProviderDisplayConfiguration(
         glyph: "✳",
         name: "Claude Code",
-        signInName: "Claude Code"
+        signInName: "Claude Code",
+        showsFableUsage: true
     )
 
     static let codex = ProviderDisplayConfiguration(
         glyph: "⬡",
         name: "Codex",
-        signInName: "Codex"
+        signInName: "Codex",
+        showsFableUsage: false
     )
 }

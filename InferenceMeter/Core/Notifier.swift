@@ -241,6 +241,7 @@ private final class UserNotificationCenterPoster: ThresholdNotificationPosting {
 private enum NotificationWindow: CaseIterable, Hashable {
     case fiveHour
     case weekly
+    case fable
 
     var label: String {
         switch self {
@@ -248,6 +249,8 @@ private enum NotificationWindow: CaseIterable, Hashable {
             "5-hour"
         case .weekly:
             "weekly"
+        case .fable:
+            "Fable"
         }
     }
 
@@ -257,6 +260,8 @@ private enum NotificationWindow: CaseIterable, Hashable {
             usage.fiveHourPct
         case .weekly:
             usage.weeklyPct
+        case .fable:
+            usage.fablePct
         }
     }
 
@@ -266,6 +271,8 @@ private enum NotificationWindow: CaseIterable, Hashable {
             usage.fiveHourResetsAt
         case .weekly:
             usage.weeklyResetsAt
+        case .fable:
+            usage.fableResetsAt
         }
     }
 }
@@ -317,6 +324,8 @@ private extension NotificationWindow {
             "five-hour"
         case .weekly:
             "weekly"
+        case .fable:
+            "fable"
         }
     }
 }

@@ -51,6 +51,7 @@ enum UsageNormalizer {
 
         let fiveHourLimit = matchingEndpointLimitPercent(for: .fiveHour, in: response.limits)
         let weeklyLimit = matchingEndpointLimitPercent(for: .weekly, in: response.limits)
+        let fableLimit = matchingScopedEndpointLimit(named: "Fable", in: response.limits)
 
         return usage(
             provider: .claude,
@@ -65,7 +66,9 @@ enum UsageNormalizer {
             fiveHourResetsAt: response.fiveHour?.resetsAt,
             weeklyResetsAt: response.sevenDay?.resetsAt,
             updatedAt: parsedAt,
-            source: .endpoint
+            source: .endpoint,
+            fablePct: fableLimit?.percent.map(clampPercentage),
+            fableResetsAt: fableLimit?.resetsAt
         )
     }
 
@@ -183,6 +186,20 @@ private extension UsageNormalizer {
         return clampPercentage(fractionScalePercent)
     }
 
+    static func matchingScopedEndpointLimit(
+        named modelName: String,
+        in limits: [ClaudeEndpointLimitDTO]
+    ) -> ClaudeEndpointLimitDTO? {
+        limits.first { limit in
+            guard limit.kind == "weekly_scoped",
+                  let displayName = limit.scope?.model?.displayName else {
+                return false
+            }
+
+            return displayName.localizedCaseInsensitiveContains(modelName)
+        }
+    }
+
     static func usage(
         provider: Provider,
         fiveHourPct: Double?,
@@ -190,7 +207,9 @@ private extension UsageNormalizer {
         fiveHourResetsAt: Date?,
         weeklyResetsAt: Date?,
         updatedAt: Date?,
-        source: UsageSource
+        source: UsageSource,
+        fablePct: Double? = nil,
+        fableResetsAt: Date? = nil
     ) -> Usage {
         Usage(
             provider: provider,
@@ -200,7 +219,9 @@ private extension UsageNormalizer {
             weeklyResetsAt: weeklyResetsAt,
             updatedAt: updatedAt,
             source: source,
-            state: fiveHourPct == nil && weeklyPct == nil ? .unavailable : .ok
+            state: fiveHourPct == nil && weeklyPct == nil && fablePct == nil ? .unavailable : .ok,
+            fablePct: fablePct,
+            fableResetsAt: fableResetsAt
         )
     }
 
@@ -362,11 +383,15 @@ private struct ClaudeEndpointLimitDTO: Codable, Sendable {
     var kind: String?
     var group: String?
     var percent: Double?
+    var resetsAt: Date?
+    var scope: ClaudeEndpointLimitScopeDTO?
 
     enum CodingKeys: String, CodingKey {
         case kind
         case group
         case percent
+        case resetsAt = "resets_at"
+        case scope
     }
 
     init(from decoder: Decoder) throws {
@@ -375,6 +400,20 @@ private struct ClaudeEndpointLimitDTO: Codable, Sendable {
         kind = try container.decodeIfPresent(String.self, forKey: .kind)
         group = try container.decodeIfPresent(String.self, forKey: .group)
         percent = container.decodeLossyDoubleIfPresent(forKey: .percent)
+        resetsAt = container.decodeFlexibleDateIfPresent(forKey: .resetsAt)
+        scope = try container.decodeIfPresent(ClaudeEndpointLimitScopeDTO.self, forKey: .scope)
+    }
+}
+
+private struct ClaudeEndpointLimitScopeDTO: Codable, Sendable {
+    var model: ClaudeEndpointLimitModelDTO?
+}
+
+private struct ClaudeEndpointLimitModelDTO: Codable, Sendable {
+    var displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
     }
 }
 

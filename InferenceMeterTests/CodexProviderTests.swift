@@ -92,6 +92,35 @@ func codexProviderMergesSparseRateLimitUpdatesByWindowDuration() async throws {
     }
 }
 
+@Test("CodexProvider merges current windows across recently active rollout files")
+func codexProviderMergesCurrentWindowsAcrossRecentRolloutFiles() async throws {
+    try await withTemporaryHome { home in
+        try writeRollout(
+            home: home,
+            name: "rollout-newer-name-older-activity.jsonl",
+            contents: """
+            {"timestamp":"2026-07-12T18:54:05Z","rate_limits":{"primary":{"used_percent":3.0,"window_minutes":300,"resets_at":1783897537},"secondary":{"used_percent":2.0,"window_minutes":10080,"resets_at":1784411864}}}
+            """,
+            modificationDate: isoDate("2026-07-12T18:54:05Z")
+        )
+        try writeRollout(
+            home: home,
+            name: "rollout-older-name-newer-activity.jsonl",
+            contents: """
+            {"timestamp":"2026-07-12T19:55:32Z","rate_limits":{"primary":{"used_percent":4.0,"window_minutes":10080,"resets_at":1784490887},"secondary":null}}
+            """,
+            modificationDate: isoDate("2026-07-12T19:55:32Z")
+        )
+
+        let usage = await CodexProvider(homeDirectory: home).refresh()
+
+        #expect(usage.state == .ok)
+        #expect(isClose(usage.fiveHourPct, to: 3))
+        #expect(isClose(usage.weeklyPct, to: 4))
+        #expect(usage.updatedAt == isoDate("2026-07-12T19:55:32Z"))
+    }
+}
+
 @Test("CodexProvider does not merge an expired window from old sparse data")
 func codexProviderDoesNotMergeExpiredWindowFromOldSparseData() async throws {
     try await withTemporaryHome { home in

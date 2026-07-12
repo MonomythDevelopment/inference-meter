@@ -64,8 +64,10 @@ func claudeEndpointFixtureParsesObservedPercentScaleUtilization() throws {
     #expect(usage.state == .ok)
     #expect(isClose(usage.fiveHourPct, to: 15))
     #expect(isClose(usage.weeklyPct, to: 4))
+    #expect(isClose(usage.fablePct, to: 4))
     #expect(usage.fiveHourResetsAt != nil)
     #expect(usage.weeklyResetsAt != nil)
+    #expect(usage.fableResetsAt != nil)
     #expect(usage.updatedAt == parsedAt)
 }
 

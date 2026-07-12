@@ -59,8 +59,10 @@ printed.
 
 Claude endpoint requests are limited to one attempt every five minutes and use exponential backoff
 after failures. Transient endpoint failures keep the last successful values visible; Claude data is
-marked stale only after fifteen minutes without a successful refresh. Codex continues to update from
-session-file events and merges sparse rate-limit snapshots by their declared window duration.
+marked stale only after fifteen minutes without a successful refresh. Scoped Claude Fable usage is
+shown as its own detail bar when the endpoint reports that limit. Codex continues to update from
+session-file events and merges sparse rate-limit snapshots across recent rollout files by their
+declared window duration.
 
 The first live Claude refresh reads the Keychain credential, so macOS may show a one-time permission
 prompt for `Claude Code-credentials`; choose "Always Allow" to let InferenceMeter read future usage

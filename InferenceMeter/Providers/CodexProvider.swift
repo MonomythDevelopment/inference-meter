@@ -73,6 +73,7 @@ struct CodexProvider: UsageProvider {
 
 private extension CodexProvider {
     static let chunkSize = 64 * 1024
+    static let maxRecentRolloutFiles = 20
     static let newlineByte: UInt8 = 10
     static let carriageReturnByte: UInt8 = 13
     static let rateLimitsNeedle = Data(#""rate_limits""#.utf8)
@@ -90,34 +91,51 @@ private extension CodexProvider {
     }
 
     func refreshFromLocalFile() -> Usage {
-        guard let rolloutURL = try? newestRolloutFile(),
-              let fileModificationDate = modificationDate(for: rolloutURL),
-              let usage = try? lastRateLimitsUsage(
-                in: rolloutURL,
-                fileModificationDate: fileModificationDate
-              ) else {
+        guard let rolloutURLs = try? recentRolloutFiles(), !rolloutURLs.isEmpty else {
             return unavailableUsage(source: .localFile)
         }
 
-        return usage
+        var accumulator = CodexUsageAccumulator()
+
+        for rolloutURL in rolloutURLs {
+            guard let fileModificationDate = modificationDate(for: rolloutURL),
+                  let usage = try? lastRateLimitsUsage(
+                    in: rolloutURL,
+                    fileModificationDate: fileModificationDate
+                  ) else {
+                continue
+            }
+
+            accumulator.merge(usage)
+
+            if accumulator.isComplete {
+                break
+            }
+        }
+
+        return accumulator.usage ?? unavailableUsage(source: .localFile)
     }
 
-    func newestRolloutFile() throws -> URL? {
+    func recentRolloutFiles(limit: Int = Self.maxRecentRolloutFiles) throws -> [URL] {
         guard directoryExists(at: sessionsDirectory) else {
-            return nil
+            return []
         }
+
+        var rolloutURLs: [URL] = []
 
         for yearURL in try sortedDirectories(in: sessionsDirectory, matching: { isDigits($0, count: 4) }) {
             for monthURL in try sortedDirectories(in: yearURL, matching: { isDigits($0, count: 2) }) {
                 for dayURL in try sortedDirectories(in: monthURL, matching: { isDigits($0, count: 2) }) {
-                    if let rolloutURL = try newestRolloutFile(in: dayURL) {
-                        return rolloutURL
+                    rolloutURLs.append(contentsOf: try rolloutFiles(in: dayURL))
+
+                    if rolloutURLs.count >= limit {
+                        return Array(rolloutURLs.prefix(limit))
                     }
                 }
             }
         }
 
-        return nil
+        return rolloutURLs
     }
 
     func sortedDirectories(in directory: URL, matching predicate: (String) -> Bool) throws -> [URL] {
@@ -137,8 +155,8 @@ private extension CodexProvider {
             .sorted { compareSessionPathComponent($0.lastPathComponent, $1.lastPathComponent) }
     }
 
-    func newestRolloutFile(in dayDirectory: URL) throws -> URL? {
-        let rolloutFiles = try FileManager.default
+    func rolloutFiles(in dayDirectory: URL) throws -> [URL] {
+        try FileManager.default
             .contentsOfDirectory(
                 at: dayDirectory,
                 includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
@@ -149,12 +167,11 @@ private extension CodexProvider {
                     && url.pathExtension == "jsonl"
                     && ((try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true)
             }
-
-        return rolloutFiles.max { lhs, rhs in
-            let lhsDate = modificationDate(for: lhs) ?? .distantPast
-            let rhsDate = modificationDate(for: rhs) ?? .distantPast
-            return lhsDate < rhsDate
-        }
+            .sorted {
+                let lhsDate = modificationDate(for: $0) ?? .distantPast
+                let rhsDate = modificationDate(for: $1) ?? .distantPast
+                return lhsDate > rhsDate
+            }
     }
 
     func lastRateLimitsUsage(in fileURL: URL, fileModificationDate: Date) throws -> Usage? {

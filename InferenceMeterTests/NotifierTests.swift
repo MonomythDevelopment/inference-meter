@@ -121,6 +121,21 @@ func weeklyNotificationCopyUsesWeeklyLabelAndMultiDayCountdown() async {
 }
 
 @MainActor
+@Test("Fable notification copy uses scoped model label")
+func fableNotificationCopyUsesScopedModelLabel() async {
+    let fixture = NotifierFixture()
+
+    await fixture.notifier.evaluate(state: fixture.state(claudeFablePct: 81))
+
+    #expect(fixture.poster.notifications.map(\.renderedText) == [
+        "Claude Fable window at 81% — resets in 3d 5h"
+    ])
+    #expect(fixture.poster.notifications.map(\.identifier) == [
+        "inference-meter.threshold.claude.fable.80"
+    ])
+}
+
+@MainActor
 @Test("Authorization denial reverts the persisted toggle")
 func authorizationDenialRevertsPersistedToggle() async {
     let fixture = NotifierFixture(authorizationStatus: .denied)
@@ -176,6 +191,7 @@ private final class NotifierFixture {
     func state(
         claudeFiveHourPct: Double? = nil,
         claudeWeeklyPct: Double? = nil,
+        claudeFablePct: Double? = nil,
         claudeFiveHourResetsAt: Date? = nil,
         claudeWeeklyResetsAt: Date? = nil,
         claudeState: UsageState = .ok,
@@ -192,7 +208,9 @@ private final class NotifierFixture {
                 weeklyPct: claudeWeeklyPct,
                 fiveHourResetsAt: claudeFiveHourResetsAt ?? codexFiveHourReset,
                 weeklyResetsAt: claudeWeeklyResetsAt ?? weeklyReset,
-                state: claudeState
+                state: claudeState,
+                fablePct: claudeFablePct,
+                fableResetsAt: weeklyReset
             ),
             codex: usage(
                 provider: .codex,
@@ -211,7 +229,9 @@ private final class NotifierFixture {
         weeklyPct: Double?,
         fiveHourResetsAt: Date?,
         weeklyResetsAt: Date?,
-        state: UsageState
+        state: UsageState,
+        fablePct: Double? = nil,
+        fableResetsAt: Date? = nil
     ) -> Usage {
         Usage(
             provider: provider,
@@ -221,7 +241,9 @@ private final class NotifierFixture {
             weeklyResetsAt: weeklyResetsAt,
             updatedAt: now,
             source: .endpoint,
-            state: state
+            state: state,
+            fablePct: fablePct,
+            fableResetsAt: fableResetsAt
         )
     }
 }
