@@ -15,7 +15,7 @@ InferenceMeter keeps the current five-hour and weekly usage windows visible with
 
 - Native SwiftUI menu bar app with no Dock icon
 - Claude Code five-hour, weekly, and Fable usage
-- Codex five-hour and weekly usage across recent CLI sessions
+- Codex usage windows reported by the installed CLI, with recent-session fallback
 - Reset times and stale-data indicators
 - Optional 80% and 95% macOS notifications
 - Wake-from-sleep and Codex session-file refreshes
@@ -52,19 +52,20 @@ The open-source release uses the Monomyth Development bundle identifier `dev.mon
 InferenceMeter is a read-only monitor. It reads credentials already owned by the CLIs:
 
 - Claude Code's `Claude Code-credentials` item in macOS Keychain
+- The installed Codex CLI's read-only `account/rateLimits/read` app-server method
 - Codex session data under `~/.codex/sessions`
 - `~/.codex/auth.json` only when a Codex endpoint is explicitly configured in code
 
 The app never sends a refresh-token request and never writes OAuth credentials. Refresh tokens can rotate when used; independently refreshing one would invalidate the CLI's stored copy and cause repeated login prompts. When Claude's access token expires, InferenceMeter asks the installed Claude Code CLI to inspect its own auth state and adopts a newer Keychain token only if the CLI writes one.
 
-Tokens, credentials, and authorization headers are not logged. The app contains no analytics, advertising, or update tracker. Network requests go directly to the configured provider endpoint.
+Tokens, credentials, and authorization headers are not logged. The app contains no analytics, advertising, or update tracker. Claude network requests go directly to its provider endpoint. Codex network requests are delegated to the installed CLI so Codex remains the sole owner of its authentication lifecycle.
 
 The first Claude refresh may trigger a macOS Keychain permission prompt. Choose **Always Allow** if you want future usage refreshes to occur without another prompt.
 
 ## Data freshness and limitations
 
 - Claude requests are limited to one attempt every five minutes. The last successful reading remains visible through transient failures and is marked stale after fifteen minutes.
-- Codex reads rate-limit snapshots from up to 20 recent rollout files and combines windows by their declared duration. Values depend on the CLI continuing to write those events.
+- Codex asks the installed CLI for its current account rate limits. If that interface is unavailable, Inference Meter falls back to snapshots from up to 20 recent rollout files and ignores windows whose reset time had already passed when they were recorded.
 - A missing window is displayed as unavailable rather than inferred from another window.
 - Provider schema changes may temporarily make a meter unavailable until the parser is updated.
 

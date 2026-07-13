@@ -16,6 +16,73 @@ func codexProviderReturnsUnavailableWhenSessionsDirectoryIsMissing() async throw
     }
 }
 
+@Test("CodexProvider prefers live CLI rate limits over stale rollout snapshots")
+func codexProviderPrefersLiveCLIRateLimits() async throws {
+    try await withTemporaryHome { home in
+        try writeRollout(
+            home: home,
+            contents: """
+            {"timestamp":"2026-07-13T16:56:25Z","rate_limits":{"primary":{"used_percent":17.0,"window_minutes":300,"resets_at":1783000000},"secondary":{"used_percent":29.0,"window_minutes":10080,"resets_at":1784500000}}}
+            """
+        )
+        let appServerClient = CodexAppServerClient {
+            Data("""
+            {"id":2,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":4000000000},"secondary":null}}}
+            """.utf8)
+        }
+        let provider = CodexProvider(
+            homeDirectory: home,
+            appServerClient: appServerClient
+        )
+
+        let usage = await provider.refresh()
+
+        #expect(usage.state == .ok)
+        #expect(usage.source == .commandLine)
+        #expect(usage.fiveHourPct == nil)
+        #expect(isClose(usage.weeklyPct, to: 42))
+    }
+}
+
+@Test("CodexProvider falls back to rollout snapshots when the CLI interface is unavailable")
+func codexProviderFallsBackWhenCLIInterfaceIsUnavailable() async throws {
+    try await withTemporaryHome { home in
+        try writeRollout(
+            home: home,
+            contents: rateLimitsLine(fiveHourPct: 17, weeklyPct: 29)
+        )
+        let provider = CodexProvider(
+            homeDirectory: home,
+            appServerClient: CodexAppServerClient { nil }
+        )
+
+        let usage = await provider.refresh()
+
+        #expect(usage.state == .ok)
+        #expect(usage.source == .localFile)
+        #expect(isClose(usage.fiveHourPct, to: 17))
+        #expect(isClose(usage.weeklyPct, to: 29))
+    }
+}
+
+@Test("CodexProvider discards an expired legacy window from the latest rollout event")
+func codexProviderDiscardsExpiredLegacyWindowFromLatestEvent() async throws {
+    try await withTemporaryHome { home in
+        try writeRollout(
+            home: home,
+            contents: """
+            {"timestamp":"2026-07-13T16:56:25Z","rate_limits":{"primary":{"used_percent":17.0,"window_minutes":300,"resets_at":1783000000},"secondary":{"used_percent":29.0,"window_minutes":10080,"resets_at":1784500000}}}
+            """
+        )
+
+        let usage = await CodexProvider(homeDirectory: home).refresh()
+
+        #expect(usage.state == .ok)
+        #expect(usage.fiveHourPct == nil)
+        #expect(isClose(usage.weeklyPct, to: 29))
+    }
+}
+
 @Test("CodexProvider returns unavailable when newest rollout has no rate limits")
 func codexProviderReturnsUnavailableWhenNewestRolloutHasNoRateLimits() async throws {
     try await withTemporaryHome { home in
@@ -166,7 +233,7 @@ func codexProviderUsesFileModificationDateWhenLineHasNoTimestamp() async throws 
         try writeRollout(
             home: home,
             contents: """
-            {"rate_limits":{"primary":{"used_percent":21.0,"window_minutes":300,"resets_at":1782948546},"secondary":{"used_percent":34.0,"window_minutes":10080,"resets_at":1783469995},"plan_type":"pro"}}
+            {"rate_limits":{"primary":{"used_percent":21.0,"window_minutes":300,"resets_at":1800002000},"secondary":{"used_percent":34.0,"window_minutes":10080,"resets_at":1800100000},"plan_type":"pro"}}
             """,
             modificationDate: modificationDate
         )

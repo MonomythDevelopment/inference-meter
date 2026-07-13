@@ -297,6 +297,8 @@ private struct ProviderUsageSection: View {
 
     private var sourceText: String {
         switch usage.source {
+        case .commandLine:
+            "Codex CLI"
         case .endpoint:
             "endpoint"
         case .localFile:

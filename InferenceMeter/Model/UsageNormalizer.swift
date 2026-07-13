@@ -1,6 +1,27 @@
 import Foundation
 
 enum UsageNormalizer {
+    static func codexAppServerRateLimits(
+        from data: Data,
+        parsedAt: Date = Date()
+    ) -> Usage {
+        let decoder = JSONDecoder()
+
+        guard let response = try? decoder.decode(CodexAppServerRateLimitsResponseDTO.self, from: data),
+              let result = response.result else {
+            return unavailableUsage(provider: .codex, source: .commandLine, parsedAt: parsedAt)
+        }
+
+        let rateLimits = result.rateLimitsByLimitID?["codex"] ?? result.rateLimits
+
+        return codexUsage(
+            windows: [rateLimits.primary, rateLimits.secondary].compactMap { $0 },
+            parsedAt: parsedAt,
+            source: .commandLine,
+            rejectsExpiredWindows: true
+        )
+    }
+
     static func codexRateLimits(
         from data: Data,
         source: UsageSource = .localFile,
@@ -10,32 +31,11 @@ enum UsageNormalizer {
             return unavailableUsage(provider: .codex, source: source, parsedAt: parsedAt)
         }
 
-        var fiveHourPct: Double?
-        var weeklyPct: Double?
-        var fiveHourResetsAt: Date?
-        var weeklyResetsAt: Date?
-
-        for window in [rateLimits.primary, rateLimits.secondary].compactMap({ $0 }) {
-            switch window.windowMinutes {
-            case 300:
-                fiveHourPct = window.usedPercent.map(clampPercentage)
-                fiveHourResetsAt = window.resetsAt
-            case 10_080:
-                weeklyPct = window.usedPercent.map(clampPercentage)
-                weeklyResetsAt = window.resetsAt
-            default:
-                continue
-            }
-        }
-
-        return usage(
-            provider: .codex,
-            fiveHourPct: fiveHourPct,
-            weeklyPct: weeklyPct,
-            fiveHourResetsAt: fiveHourResetsAt,
-            weeklyResetsAt: weeklyResetsAt,
-            updatedAt: parsedAt,
-            source: source
+        return codexUsage(
+            windows: [rateLimits.primary, rateLimits.secondary].compactMap { $0 },
+            parsedAt: parsedAt,
+            source: source,
+            rejectsExpiredWindows: false
         )
     }
 
@@ -98,6 +98,47 @@ private extension UsageNormalizer {
     enum ClaudeEndpointWindow {
         case fiveHour
         case weekly
+    }
+
+    static func codexUsage(
+        windows: [CodexRateLimitWindow],
+        parsedAt: Date,
+        source: UsageSource,
+        rejectsExpiredWindows: Bool
+    ) -> Usage {
+        var fiveHourPct: Double?
+        var weeklyPct: Double?
+        var fiveHourResetsAt: Date?
+        var weeklyResetsAt: Date?
+
+        for window in windows {
+            if rejectsExpiredWindows,
+               let resetsAt = window.resetsAt,
+               resetsAt <= parsedAt {
+                continue
+            }
+
+            switch window.windowMinutes {
+            case 300:
+                fiveHourPct = window.usedPercent.map(clampPercentage)
+                fiveHourResetsAt = window.resetsAt
+            case 10_080:
+                weeklyPct = window.usedPercent.map(clampPercentage)
+                weeklyResetsAt = window.resetsAt
+            default:
+                continue
+            }
+        }
+
+        return usage(
+            provider: .codex,
+            fiveHourPct: fiveHourPct,
+            weeklyPct: weeklyPct,
+            fiveHourResetsAt: fiveHourResetsAt,
+            weeklyResetsAt: weeklyResetsAt,
+            updatedAt: parsedAt,
+            source: source
+        )
     }
 
     static func decodeCodexRateLimits(from data: Data) -> CodexRateLimitsDTO? {
@@ -307,7 +348,13 @@ private struct CodexRateLimitsSearchDTO: Decodable, Sendable {
     }
 }
 
-private struct CodexRateLimitWindowDTO: Codable, Sendable {
+private protocol CodexRateLimitWindow {
+    var usedPercent: Double? { get }
+    var windowMinutes: Int? { get }
+    var resetsAt: Date? { get }
+}
+
+private struct CodexRateLimitWindowDTO: Codable, Sendable, CodexRateLimitWindow {
     var usedPercent: Double?
     var windowMinutes: Int?
     var resetsAt: Date?
@@ -316,6 +363,45 @@ private struct CodexRateLimitWindowDTO: Codable, Sendable {
         case usedPercent = "used_percent"
         case windowMinutes = "window_minutes"
         case resetsAt = "resets_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        usedPercent = container.decodeLossyDoubleIfPresent(forKey: .usedPercent)
+        windowMinutes = container.decodeLossyIntIfPresent(forKey: .windowMinutes)
+        resetsAt = container.decodeFlexibleDateIfPresent(forKey: .resetsAt)
+    }
+}
+
+private struct CodexAppServerRateLimitsResponseDTO: Decodable, Sendable {
+    var result: CodexAppServerRateLimitsResultDTO?
+}
+
+private struct CodexAppServerRateLimitsResultDTO: Decodable, Sendable {
+    var rateLimits: CodexAppServerRateLimitSnapshotDTO
+    var rateLimitsByLimitID: [String: CodexAppServerRateLimitSnapshotDTO]?
+
+    enum CodingKeys: String, CodingKey {
+        case rateLimits
+        case rateLimitsByLimitID = "rateLimitsByLimitId"
+    }
+}
+
+private struct CodexAppServerRateLimitSnapshotDTO: Decodable, Sendable {
+    var primary: CodexAppServerRateLimitWindowDTO?
+    var secondary: CodexAppServerRateLimitWindowDTO?
+}
+
+private struct CodexAppServerRateLimitWindowDTO: Decodable, Sendable, CodexRateLimitWindow {
+    var usedPercent: Double?
+    var windowMinutes: Int?
+    var resetsAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case usedPercent
+        case windowMinutes = "windowDurationMins"
+        case resetsAt
     }
 
     init(from decoder: Decoder) throws {

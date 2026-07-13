@@ -6,6 +6,7 @@ enum Provider: Sendable, Hashable {
 }
 
 enum UsageSource: Sendable {
+    case commandLine
     case endpoint
     case localFile
 }

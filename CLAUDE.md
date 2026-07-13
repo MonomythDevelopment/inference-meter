@@ -29,10 +29,10 @@ Tests use Swift Testing (`@Test` and `#expect`), not XCTest test cases. Keep net
 
 Data flows from a provider through `RefreshEngine` and `AppState` to SwiftUI.
 
-- `Model/Usage.swift` defines the shared value: optional five-hour, weekly, and Fable percentages and reset dates; endpoint or local-file source; and `ok`, `stale`, `refreshRequired`, `unauthorized`, or `unavailable` state.
+- `Model/Usage.swift` defines the shared value: optional five-hour, weekly, and Fable percentages and reset dates; command-line, endpoint, or local-file source; and `ok`, `stale`, `refreshRequired`, `unauthorized`, or `unavailable` state.
 - `Providers/UsageProvider.swift` defines `refresh() async -> Usage` and `reauthenticate() async -> Bool`.
 - `Providers/ClaudeProvider.swift` reads Claude Code's Keychain credential and calls the Claude usage endpoint.
-- `Providers/CodexProvider.swift` merges rate-limit snapshots across recent Codex rollout files. Endpoint support is injectable but is not configured by the app.
+- `Providers/CodexProvider.swift` asks the installed Codex CLI app-server for current rate limits, then falls back to merging non-expired snapshots across recent rollout files. Direct endpoint support remains injectable but is not configured by the app.
 - `Core/RefreshEngine.swift` handles polling, provider-specific minimum intervals, exponential backoff, staleness, wake events, and Codex filesystem events.
 - `Core/Notifier.swift` emits deduplicated 80% and 95% notifications for available windows.
 - `UI/` contains the menu bar label and detail popover.
