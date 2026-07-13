@@ -19,15 +19,15 @@ func thresholdPredicateTreatsEqualityAsCrossingBoundary() {
     #expect(isAtOrAboveUsageThreshold(95.1, threshold: 95))
 }
 
-@Test("Full mode renders Claude windows and the Codex weekly window")
-func fullModeRendersClaudeWindowsAndCodexWeeklyWindow() {
+@Test("Full mode renders five-hour and weekly windows for both providers")
+func fullModeRendersFiveHourAndWeeklyWindowsForBothProviders() {
     let segments = labelSegments(
         claude: usage(provider: .claude, fiveHourPct: 45, weeklyPct: 70),
         codex: usage(provider: .codex, fiveHourPct: 30, weeklyPct: 90),
         compact: false
     )
 
-    #expect(segmentText(segments) == "✳ 45·70  ⬡ 90")
+    #expect(segmentText(segments) == "✳ 45·70  ⬡ 30·90")
     #expect(segments == [
         MenuBarLabelSegment(text: "✳ ", color: .primary),
         MenuBarLabelSegment(text: "45", color: Color(.systemGreen)),
@@ -35,6 +35,8 @@ func fullModeRendersClaudeWindowsAndCodexWeeklyWindow() {
         MenuBarLabelSegment(text: "70", color: Color(.systemOrange)),
         MenuBarLabelSegment(text: "  ", color: .primary),
         MenuBarLabelSegment(text: "⬡ ", color: .primary),
+        MenuBarLabelSegment(text: "30", color: Color(.systemGreen)),
+        MenuBarLabelSegment(text: "·", color: .primary),
         MenuBarLabelSegment(text: "90", color: Color(.systemRed))
     ])
 }
@@ -47,13 +49,13 @@ func compactModeUsesEachProvidersPrimaryDisplayedWindow() {
         compact: true
     )
 
-    #expect(segmentText(segments) == "✳ 45 ⬡ 55")
+    #expect(segmentText(segments) == "✳ 45 ⬡ 30")
     #expect(segments == [
         MenuBarLabelSegment(text: "✳ ", color: .primary),
         MenuBarLabelSegment(text: "45", color: Color(.systemGreen)),
         MenuBarLabelSegment(text: " ", color: .primary),
         MenuBarLabelSegment(text: "⬡ ", color: .primary),
-        MenuBarLabelSegment(text: "55", color: Color(.systemGreen))
+        MenuBarLabelSegment(text: "30", color: Color(.systemGreen))
     ])
 }
 
@@ -70,12 +72,12 @@ func staleProvidersKeepValuesVisibleInSecondaryGray() {
         compact: true
     )
 
-    #expect(segmentText(fullSegments) == "✳ 70·90  ⬡ 100")
+    #expect(segmentText(fullSegments) == "✳ 70·90  ⬡ 90·100")
     #expect(fullSegments[1].color == .secondary)
     #expect(fullSegments[3].color == .secondary)
     #expect(fullSegments[6].color == Color(.systemRed))
 
-    #expect(segmentText(compactSegments) == "✳ 70 ⬡ 100")
+    #expect(segmentText(compactSegments) == "✳ 70 ⬡ 90")
     #expect(compactSegments[1].color == .secondary)
     #expect(compactSegments[4].color == Color(.systemRed))
 }
@@ -110,7 +112,7 @@ func unauthorizedProvidersRenderAuthMarkersInFullAndCompactModes() {
     #expect(segmentText(fullSegments) == "✳ 45·70  ⬡ !")
     #expect(fullSegments.last == MenuBarLabelSegment(text: "!", color: Color(.systemOrange)))
 
-    #expect(segmentText(compactSegments) == "✳ ! ⬡ 55")
+    #expect(segmentText(compactSegments) == "✳ ! ⬡ 30")
     #expect(compactSegments[1] == MenuBarLabelSegment(text: "!", color: Color(.systemOrange)))
 }
 
@@ -127,12 +129,13 @@ func unavailableProvidersRenderDashesInsteadOfZeroValues() {
         compact: true
     )
 
-    #expect(segmentText(fullSegments) == "✳ --·--  ⬡ 70")
+    #expect(segmentText(fullSegments) == "✳ --·--  ⬡  0·70")
     #expect(fullSegments[1].color == .secondary)
     #expect(fullSegments[3].color == .secondary)
     #expect(fullSegments[6].color == Color(.systemGreen))
+    #expect(fullSegments[8].color == Color(.systemGreen))
 
-    #expect(segmentText(compactSegments) == "✳ -- ⬡ 70")
+    #expect(segmentText(compactSegments) == "✳ -- ⬡  0")
     #expect(compactSegments[1].color == .secondary)
     #expect(compactSegments[4].color == Color(.systemGreen))
 }
@@ -145,21 +148,22 @@ func nilValuesRenderAsDashesAndSingleDigitsUseStableSlot() {
         compact: false
     )
 
-    #expect(segmentText(segments) == "✳  9·--  ⬡ 10")
+    #expect(segmentText(segments) == "✳  9·--  ⬡ --·10")
     #expect(segments[1] == MenuBarLabelSegment(text: " 9", color: Color(.systemGreen)))
     #expect(segments[3] == MenuBarLabelSegment(text: "--", color: .secondary))
-    #expect(segments[6] == MenuBarLabelSegment(text: "10", color: Color(.systemGreen)))
+    #expect(segments[6] == MenuBarLabelSegment(text: "--", color: .secondary))
+    #expect(segments[8] == MenuBarLabelSegment(text: "10", color: Color(.systemGreen)))
 }
 
-@Test("Codex ignores a legacy five-hour value when weekly usage is absent")
-func codexIgnoresLegacyFiveHourValueWhenWeeklyUsageIsAbsent() {
+@Test("Codex renders an available five-hour value when weekly usage is absent")
+func codexRendersFiveHourValueWhenWeeklyUsageIsAbsent() {
     let segments = labelSegments(
         claude: usage(provider: .claude, fiveHourPct: 45, weeklyPct: 70),
         codex: usage(provider: .codex, fiveHourPct: 99, weeklyPct: nil),
         compact: false
     )
 
-    #expect(segmentText(segments) == "✳ 45·70  ⬡ --")
+    #expect(segmentText(segments) == "✳ 45·70  ⬡ 99·--")
     #expect(segments.last == MenuBarLabelSegment(text: "--", color: .secondary))
 }
 

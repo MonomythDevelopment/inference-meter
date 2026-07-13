@@ -84,7 +84,7 @@ private func displayedPercentages(for usage: Usage, compact: Bool) -> [Double?] 
     case .claude:
         percentages = [usage.fiveHourPct, usage.weeklyPct]
     case .codex:
-        percentages = [usage.weeklyPct]
+        percentages = [usage.fiveHourPct, usage.weeklyPct]
     }
 
     return compact ? Array(percentages.prefix(1)) : percentages

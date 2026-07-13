@@ -12,7 +12,9 @@ enum UsageNormalizer {
             return unavailableUsage(provider: .codex, source: .commandLine, parsedAt: parsedAt)
         }
 
-        let rateLimits = result.rateLimitsByLimitID?["codex"] ?? result.rateLimits
+        guard let rateLimits = result.rateLimitsByLimitID?["codex"] ?? result.rateLimits else {
+            return unavailableUsage(provider: .codex, source: .commandLine, parsedAt: parsedAt)
+        }
 
         return codexUsage(
             windows: [rateLimits.primary, rateLimits.secondary].compactMap { $0 },
@@ -379,7 +381,7 @@ private struct CodexAppServerRateLimitsResponseDTO: Decodable, Sendable {
 }
 
 private struct CodexAppServerRateLimitsResultDTO: Decodable, Sendable {
-    var rateLimits: CodexAppServerRateLimitSnapshotDTO
+    var rateLimits: CodexAppServerRateLimitSnapshotDTO?
     var rateLimitsByLimitID: [String: CodexAppServerRateLimitSnapshotDTO]?
 
     enum CodingKeys: String, CodingKey {

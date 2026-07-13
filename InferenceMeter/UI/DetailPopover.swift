@@ -496,7 +496,7 @@ private struct ProviderDisplayConfiguration {
         glyph: "⬡",
         name: "Codex",
         signInName: "Codex",
-        showsFiveHourUsage: false,
+        showsFiveHourUsage: true,
         showsFableUsage: false
     )
 }
