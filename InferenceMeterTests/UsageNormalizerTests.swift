@@ -60,6 +60,33 @@ func codexAppServerResponseKeepsCurrentAvailableWindows() {
     #expect(usage.updatedAt == parsedAt)
 }
 
+@Test("Codex app-server response maps restored five-hour and weekly windows by duration")
+func codexAppServerResponseMapsRestoredWindowsByDuration() {
+    let parsedAt = Date(timeIntervalSince1970: 1_800_000_000)
+    let payload = data("""
+    {
+      "id": 2,
+      "result": {
+        "rateLimitsByLimitId": {
+          "codex": {
+            "limitId": "codex",
+            "primary": {"usedPercent": 42, "windowDurationMins": 10080, "resetsAt": 1800604800},
+            "secondary": {"usedPercent": 17, "windowDurationMins": 300, "resetsAt": 1800003600}
+          }
+        }
+      }
+    }
+    """)
+
+    let usage = UsageNormalizer.codexAppServerRateLimits(from: payload, parsedAt: parsedAt)
+
+    #expect(usage.state == .ok)
+    #expect(isClose(usage.fiveHourPct, to: 17))
+    #expect(isClose(usage.weeklyPct, to: 42))
+    #expect(usage.fiveHourResetsAt == Date(timeIntervalSince1970: 1_800_003_600))
+    #expect(usage.weeklyResetsAt == Date(timeIntervalSince1970: 1_800_604_800))
+}
+
 @Test("Codex app-server response rejects an expired legacy window")
 func codexAppServerResponseRejectsExpiredLegacyWindow() {
     let parsedAt = Date(timeIntervalSince1970: 1_800_000_000)

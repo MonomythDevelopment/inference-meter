@@ -96,12 +96,12 @@ Apple's supported command-line flow is documented in [Customizing the notarizati
 
 A public binary must match the commit referenced by its Git tag. Do not build an asset from a newer `main` commit and attach it to an older release.
 
-For the existing v0.1.3 source release, use a clean checkout or temporary worktree at that tag:
+For the existing v0.1.4 source release, use a clean checkout or temporary worktree at that tag:
 
 ```sh
 git fetch origin --tags
-git worktree add ../inference-meter-v0.1.3 v0.1.3
-cd ../inference-meter-v0.1.3
+git worktree add ../inference-meter-v0.1.4 v0.1.4
+cd ../inference-meter-v0.1.4
 git status --short
 ```
 
@@ -148,7 +148,7 @@ Apple's current notarization requirements are documented in [Notarizing macOS so
 Set the release version and app paths:
 
 ```sh
-VERSION="0.1.3"
+VERSION="0.1.4"
 APP_PATH="DerivedData/Release/Build/Products/Release/InferenceMeter.app"
 ZIP_PATH="dist/InferenceMeter-${VERSION}.zip"
 ```

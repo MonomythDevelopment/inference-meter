@@ -121,13 +121,20 @@ func weeklyNotificationCopyUsesWeeklyLabelAndMultiDayCountdown() async {
 }
 
 @MainActor
-@Test("Codex legacy five-hour values never post notifications")
-func codexLegacyFiveHourValuesNeverPostNotifications() async {
+@Test("Codex five-hour values post threshold notifications")
+func codexFiveHourValuesPostThresholdNotifications() async {
     let fixture = NotifierFixture()
 
     await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 96))
 
-    #expect(fixture.poster.notifications.isEmpty)
+    #expect(fixture.poster.notifications.map(\.renderedText) == [
+        "Codex 5-hour window at 96% — resets in 1h 40m",
+        "Codex 5-hour window at 96% — resets in 1h 40m"
+    ])
+    #expect(fixture.poster.notifications.map(\.identifier) == [
+        "inference-meter.threshold.codex.five-hour.80",
+        "inference-meter.threshold.codex.five-hour.95"
+    ])
 }
 
 @MainActor

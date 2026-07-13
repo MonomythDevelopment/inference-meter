@@ -248,7 +248,7 @@ private enum NotificationWindow: CaseIterable, Hashable {
         case .claude:
             allCases
         case .codex:
-            [.weekly]
+            [.fiveHour, .weekly]
         }
     }
 

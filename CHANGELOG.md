@@ -4,6 +4,16 @@ All notable changes to InferenceMeter are documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-07-13
+
+Codex quota-window restoration release after its five-hour limit proved to be temporarily absent rather than retired.
+
+### Fixed
+
+- Restore Codex five-hour usage in the menu-bar label, detail popover, and 80%/95% threshold notifications.
+- Accept app-server responses that provide the Codex snapshot only in `rateLimitsByLimitId`.
+- Keep an omitted five-hour window unavailable until Codex reports it again instead of showing an expired local value.
+
 ## [0.1.3] - 2026-07-13
 
 Codex compatibility release following the upstream removal of its five-hour usage window.
@@ -46,6 +56,7 @@ First public source release. A signed and notarized app archive will be added wh
 
 - Adopt the Monomyth Development bundle identifier `dev.monomyth.InferenceMeter` for public releases. Users of pre-public builds must re-enable Launch at Login.
 
-[Unreleased]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MonomythDevelopment/inference-meter/releases/tag/v0.1.2
