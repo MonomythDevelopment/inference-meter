@@ -32,12 +32,12 @@ Use this checklist before changing the repository from private to public.
 
 ## Signed binary distribution
 
-> Blocked on distribution credentials: the release Mac has no Monomyth Development Developer ID Application identity or notarization keychain profile. Never publish the ad-hoc validation archive.
+> Blocked on distribution credentials: the release Mac has no Monomyth Development Developer ID Application identity or notarization keychain profile. Never publish the ad-hoc validation archive. Follow [Apple distribution credentials and notarization](APPLE_DISTRIBUTION.md) for the complete setup and validation process.
 
 - [ ] Build with a Monomyth Development Developer ID Application certificate.
 - [ ] Notarize the app, staple the ticket, and verify Gatekeeper acceptance.
 - [ ] Confirm the app launches on a clean macOS user account and reads neither credential without user authorization.
-- [ ] Upload `InferenceMeter-0.1.2.zip` and a SHA-256 checksum.
+- [ ] Upload the current version's signed ZIP and SHA-256 checksum.
 - [ ] Verify the release instructions and download on a separate Mac or clean VM.
 
 ## After publication

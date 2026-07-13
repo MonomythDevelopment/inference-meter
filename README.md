@@ -86,7 +86,7 @@ Create a local release archive with:
 ./scripts/release.sh
 ```
 
-Without `CODESIGN_IDENTITY`, the release script uses ad-hoc signing for local testing. Public distribution requires a Developer ID Application certificate and notarization credentials; see the comments printed by the script.
+Without `CODESIGN_IDENTITY`, the release script uses ad-hoc signing for local testing. Public distribution requires a Developer ID Application certificate and notarization credentials. Follow the project-specific [Apple distribution and notarization guide](docs/APPLE_DISTRIBUTION.md) for credential setup, signing, verification, and future GitHub Actions automation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
