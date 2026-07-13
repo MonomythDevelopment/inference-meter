@@ -11,7 +11,7 @@ This is the public Monomyth Development repository (`MonomythDevelopment/inferen
 - `CHANGELOG.md` follows Keep a Changelog / SemVer — add an `[Unreleased]` entry for user-facing changes.
 - Community policy files (`CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`) and GitHub issue/PR templates are in place; releases follow `docs/OPEN_SOURCE_RELEASE_CHECKLIST.md`.
 - Signed distribution credential setup, notarization, validation, and CI guidance live in `docs/APPLE_DISTRIBUTION.md`.
-- v0.1.3 ships as a source-only release; attaching a signed, notarized binary is blocked on Monomyth Apple distribution credentials.
+- v0.1.4 ships as a source-only release; attaching a signed, notarized binary is blocked on Monomyth Apple distribution credentials.
 
 ## Build and test
 
