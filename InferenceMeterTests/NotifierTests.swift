@@ -7,20 +7,20 @@ import Testing
 func crossingEightyPercentPostsOnceUntilRecovery() async {
     let fixture = NotifierFixture()
 
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 79))
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 80))
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 88))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 79))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 80))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 88))
 
     #expect(fixture.poster.notifications.map(\.renderedText) == [
-        "Codex 5-hour window at 80% — resets in 1h 40m"
+        "Claude 5-hour window at 80% — resets in 1h 40m"
     ])
 
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 79))
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 81))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 79))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 81))
 
     #expect(fixture.poster.notifications.map(\.renderedText) == [
-        "Codex 5-hour window at 80% — resets in 1h 40m",
-        "Codex 5-hour window at 81% — resets in 1h 40m"
+        "Claude 5-hour window at 80% — resets in 1h 40m",
+        "Claude 5-hour window at 81% — resets in 1h 40m"
     ])
 }
 
@@ -29,16 +29,16 @@ func crossingEightyPercentPostsOnceUntilRecovery() async {
 func jumpAcrossBothThresholdsPostsEightyAndNinetyFive() async {
     let fixture = NotifierFixture()
 
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 60))
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 96))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 60))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 96))
 
     #expect(fixture.poster.notifications.map(\.renderedText) == [
-        "Codex 5-hour window at 96% — resets in 1h 40m",
-        "Codex 5-hour window at 96% — resets in 1h 40m"
+        "Claude 5-hour window at 96% — resets in 1h 40m",
+        "Claude 5-hour window at 96% — resets in 1h 40m"
     ])
     #expect(fixture.poster.notifications.map(\.identifier) == [
-        "inference-meter.threshold.codex.five-hour.80",
-        "inference-meter.threshold.codex.five-hour.95"
+        "inference-meter.threshold.claude.five-hour.80",
+        "inference-meter.threshold.claude.five-hour.95"
     ])
 }
 
@@ -46,17 +46,17 @@ func jumpAcrossBothThresholdsPostsEightyAndNinetyFive() async {
 @Test("Window reset re-arms sent thresholds")
 func windowResetRearmsSentThresholds() async {
     let fixture = NotifierFixture()
-    let nextReset = fixture.codexFiveHourReset.addingTimeInterval(5 * 60 * 60)
+    let nextReset = fixture.fiveHourReset.addingTimeInterval(5 * 60 * 60)
 
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 85))
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 87))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 85))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 87))
     await fixture.notifier.evaluate(
-        state: fixture.state(codexFiveHourPct: 86, codexFiveHourResetsAt: nextReset)
+        state: fixture.state(claudeFiveHourPct: 86, claudeFiveHourResetsAt: nextReset)
     )
 
     #expect(fixture.poster.notifications.map(\.renderedText) == [
-        "Codex 5-hour window at 85% — resets in 1h 40m",
-        "Codex 5-hour window at 86% — resets in 6h 40m"
+        "Claude 5-hour window at 85% — resets in 1h 40m",
+        "Claude 5-hour window at 86% — resets in 6h 40m"
     ])
 }
 
@@ -67,17 +67,17 @@ func nonOkStatesDoNotPostOrCorruptMarkers() async {
 
     for state in [UsageState.stale, .refreshRequired, .unauthorized, .unavailable] {
         await fixture.notifier.evaluate(
-            state: fixture.state(codexFiveHourPct: 96, codexState: state)
+            state: fixture.state(claudeFiveHourPct: 96, claudeState: state)
         )
     }
 
     #expect(fixture.poster.notifications.isEmpty)
 
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 96))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 96))
 
     #expect(fixture.poster.notifications.map(\.identifier) == [
-        "inference-meter.threshold.codex.five-hour.80",
-        "inference-meter.threshold.codex.five-hour.95"
+        "inference-meter.threshold.claude.five-hour.80",
+        "inference-meter.threshold.claude.five-hour.95"
     ])
 }
 
@@ -86,7 +86,7 @@ func nonOkStatesDoNotPostOrCorruptMarkers() async {
 func disabledNotificationSettingMakesEvaluationNoOp() async {
     let fixture = NotifierFixture(notificationsEnabled: false)
 
-    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 96))
+    await fixture.notifier.evaluate(state: fixture.state(claudeFiveHourPct: 96))
 
     #expect(fixture.poster.notifications.isEmpty)
 }
@@ -118,6 +118,16 @@ func weeklyNotificationCopyUsesWeeklyLabelAndMultiDayCountdown() async {
         "inference-meter.threshold.codex.weekly.80",
         "inference-meter.threshold.codex.weekly.95"
     ])
+}
+
+@MainActor
+@Test("Codex legacy five-hour values never post notifications")
+func codexLegacyFiveHourValuesNeverPostNotifications() async {
+    let fixture = NotifierFixture()
+
+    await fixture.notifier.evaluate(state: fixture.state(codexFiveHourPct: 96))
+
+    #expect(fixture.poster.notifications.isEmpty)
 }
 
 @MainActor
@@ -166,7 +176,7 @@ func firstEnableRequestsAuthorizationOnlyWhenUndetermined() async {
 @MainActor
 private final class NotifierFixture {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let codexFiveHourReset: Date
+    let fiveHourReset: Date
     let weeklyReset: Date
     let settingsStore: MemoryNotificationSettingsStore
     let poster: RecordingThresholdNotificationPoster
@@ -176,7 +186,7 @@ private final class NotifierFixture {
         notificationsEnabled: Bool = true,
         authorizationStatus: ThresholdNotificationAuthorizationStatus = .authorized
     ) {
-        codexFiveHourReset = now.addingTimeInterval(100 * 60)
+        fiveHourReset = now.addingTimeInterval(100 * 60)
         weeklyReset = now.addingTimeInterval((3 * 24 * 60 * 60) + (5 * 60 * 60))
         settingsStore = MemoryNotificationSettingsStore(notificationsEnabled: notificationsEnabled)
         poster = RecordingThresholdNotificationPoster(authorizationStatus: authorizationStatus)
@@ -206,7 +216,7 @@ private final class NotifierFixture {
                 provider: .claude,
                 fiveHourPct: claudeFiveHourPct,
                 weeklyPct: claudeWeeklyPct,
-                fiveHourResetsAt: claudeFiveHourResetsAt ?? codexFiveHourReset,
+                fiveHourResetsAt: claudeFiveHourResetsAt ?? fiveHourReset,
                 weeklyResetsAt: claudeWeeklyResetsAt ?? weeklyReset,
                 state: claudeState,
                 fablePct: claudeFablePct,
@@ -216,7 +226,7 @@ private final class NotifierFixture {
                 provider: .codex,
                 fiveHourPct: codexFiveHourPct,
                 weeklyPct: codexWeeklyPct,
-                fiveHourResetsAt: codexFiveHourResetsAt ?? codexFiveHourReset,
+                fiveHourResetsAt: codexFiveHourResetsAt ?? fiveHourReset,
                 weeklyResetsAt: codexWeeklyResetsAt ?? weeklyReset,
                 state: codexState
             )

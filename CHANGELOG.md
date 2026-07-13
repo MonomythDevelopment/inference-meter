@@ -11,6 +11,7 @@ All notable changes to InferenceMeter are documented here. The project follows [
 ### Changed
 
 - Use the installed Codex CLI's read-only app-server interface before falling back to recent session data.
+- Remove Codex's retired five-hour meter and threshold notifications while keeping Claude's five-hour window unchanged.
 
 ## [0.1.2] - 2026-07-12
 

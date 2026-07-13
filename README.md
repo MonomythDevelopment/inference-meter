@@ -6,7 +6,7 @@
 
 A private, native macOS menu bar meter for Claude Code and Codex usage limits.
 
-InferenceMeter keeps the current five-hour and weekly usage windows visible without opening either CLI. Claude's scoped Fable limit is shown when available, and threshold notifications can warn at 80% and 95%.
+InferenceMeter keeps Claude's five-hour and weekly windows plus Codex's provider-reported weekly window visible without opening either CLI. Claude's scoped Fable limit is shown when available, and threshold notifications can warn at 80% and 95%.
 
 > [!IMPORTANT]
 > InferenceMeter relies on provider-owned, undocumented usage data. Claude Code or Codex updates can change those formats without notice. The project is maintained on a best-effort basis and is not affiliated with, endorsed by, or supported by Anthropic or OpenAI.

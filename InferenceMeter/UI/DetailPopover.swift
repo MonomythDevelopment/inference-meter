@@ -228,13 +228,15 @@ private struct ProviderUsageSection: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                UsageWindowRow(
-                    title: "5-hour",
-                    percentage: usage.fiveHourPct,
-                    resetsAt: usage.fiveHourResetsAt,
-                    state: usage.state,
-                    now: now
-                )
+                if configuration.showsFiveHourUsage {
+                    UsageWindowRow(
+                        title: "5-hour",
+                        percentage: usage.fiveHourPct,
+                        resetsAt: usage.fiveHourResetsAt,
+                        state: usage.state,
+                        now: now
+                    )
+                }
 
                 UsageWindowRow(
                     title: "Weekly",
@@ -431,12 +433,14 @@ private struct ProviderDisplayConfiguration {
     let glyph: String
     let name: String
     let signInName: String
+    let showsFiveHourUsage: Bool
     let showsFableUsage: Bool
 
     static let claude = ProviderDisplayConfiguration(
         glyph: "✳",
         name: "Claude Code",
         signInName: "Claude Code",
+        showsFiveHourUsage: true,
         showsFableUsage: true
     )
 
@@ -444,6 +448,7 @@ private struct ProviderDisplayConfiguration {
         glyph: "⬡",
         name: "Codex",
         signInName: "Codex",
+        showsFiveHourUsage: false,
         showsFableUsage: false
     )
 }
