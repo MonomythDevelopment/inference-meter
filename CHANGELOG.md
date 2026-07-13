@@ -4,6 +4,15 @@ All notable changes to InferenceMeter are documented here. The project follows [
 
 ## [Unreleased]
 
+### Fixed
+
+- Prefer Codex's live CLI rate-limit snapshot and ignore expired legacy windows left in rollout files after an upstream quota change.
+
+### Changed
+
+- Use the installed Codex CLI's read-only app-server interface before falling back to recent session data.
+- Remove Codex's retired five-hour meter and threshold notifications while keeping Claude's five-hour window unchanged.
+
 ## [0.1.2] - 2026-07-12
 
 First public source release. A signed and notarized app archive will be added when Monomyth Development's Apple distribution credentials are available.

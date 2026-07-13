@@ -18,41 +18,63 @@ struct CodexProvider: UsageProvider {
     private let session: URLSession
     private let authFileReader: FileReader
     private let tokenStore: TokenStore
+    private let appServerClient: CodexAppServerClient?
 
     init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         endpointConfiguration: CodexEndpointConfiguration? = nil,
         session: URLSession = .shared,
         authFileReader: FileReader = FileReader(),
-        tokenStore: TokenStore = TokenStore()
+        tokenStore: TokenStore = TokenStore(),
+        appServerClient: CodexAppServerClient? = nil
     ) {
         self.homeDirectory = homeDirectory
         self.endpointConfiguration = endpointConfiguration
         self.session = session
         self.authFileReader = authFileReader
         self.tokenStore = tokenStore
+        self.appServerClient = appServerClient ?? Self.defaultAppServerClient(
+            homeDirectory: homeDirectory
+        )
     }
 
     func refresh() async -> Usage {
-        guard endpointConfiguration != nil else {
-            return refreshFromLocalFile()
-        }
+        guard endpointConfiguration == nil else {
+            let endpointUsage = await refreshFromEndpoint()
+            guard endpointUsage.state != .ok else {
+                return endpointUsage
+            }
 
-        let endpointUsage = await refreshFromEndpoint()
-        guard endpointUsage.state != .ok else {
-            return endpointUsage
-        }
+            guard endpointUsage.state != .unauthorized else {
+                return endpointUsage
+            }
 
-        guard endpointUsage.state != .unauthorized else {
-            return endpointUsage
-        }
+            let localUsage = refreshFromLocalFile()
+            if localUsage.state == .ok {
+                return localUsage
+            }
 
-        let localUsage = refreshFromLocalFile()
-        if localUsage.state == .ok {
             return localUsage
         }
 
-        return localUsage
+        if let appServerData = await appServerClient?.fetchRateLimits() {
+            let appServerUsage = UsageNormalizer.codexAppServerRateLimits(from: appServerData)
+
+            if appServerUsage.state == .ok {
+                return appServerUsage
+            }
+        }
+
+        return refreshFromLocalFile()
+    }
+
+    private static func defaultAppServerClient(homeDirectory: URL) -> CodexAppServerClient? {
+        guard homeDirectory.standardizedFileURL
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL else {
+            return nil
+        }
+
+        return .live(homeDirectory: homeDirectory)
     }
 
     func reauthenticate() async -> Bool {
@@ -449,6 +471,11 @@ private struct CodexUsageAccumulator {
     private func isCurrentWindow(resetsAt: Date?, observedAt: Date?) -> Bool {
         guard let updatedAt else {
             return true
+        }
+
+        if let resetsAt,
+           resetsAt <= (observedAt ?? updatedAt) {
+            return false
         }
 
         if observedAt == updatedAt {

@@ -20,6 +20,68 @@ func codexJSONLFixtureMapsWindowsByMinutes() throws {
     #expect(usage.updatedAt == parsedAt)
 }
 
+@Test("Codex app-server response keeps the current weekly window and absent five-hour window")
+func codexAppServerResponseKeepsCurrentAvailableWindows() {
+    let parsedAt = Date(timeIntervalSince1970: 1_800_000_000)
+    let payload = data("""
+    {
+      "id": 2,
+      "result": {
+        "rateLimits": {
+          "limitId": "codex",
+          "primary": {"usedPercent": 29, "windowDurationMins": 10080, "resetsAt": 1800604800},
+          "secondary": {"usedPercent": 17, "windowDurationMins": 300, "resetsAt": 1799000000}
+        },
+        "rateLimitsByLimitId": {
+          "codex": {
+            "limitId": "codex",
+            "primary": {"usedPercent": 42, "windowDurationMins": 10080, "resetsAt": 1800604800},
+            "secondary": null
+          },
+          "codex_bengalfox": {
+            "limitId": "codex_bengalfox",
+            "primary": {"usedPercent": 87, "windowDurationMins": 10080, "resetsAt": 1784566657},
+            "secondary": null
+          }
+        }
+      }
+    }
+    """)
+
+    let usage = UsageNormalizer.codexAppServerRateLimits(from: payload, parsedAt: parsedAt)
+
+    #expect(usage.provider == .codex)
+    #expect(usage.source == .commandLine)
+    #expect(usage.state == .ok)
+    #expect(usage.fiveHourPct == nil)
+    #expect(isClose(usage.weeklyPct, to: 42))
+    #expect(usage.fiveHourResetsAt == nil)
+    #expect(usage.weeklyResetsAt == Date(timeIntervalSince1970: 1_800_604_800))
+    #expect(usage.updatedAt == parsedAt)
+}
+
+@Test("Codex app-server response rejects an expired legacy window")
+func codexAppServerResponseRejectsExpiredLegacyWindow() {
+    let parsedAt = Date(timeIntervalSince1970: 1_800_000_000)
+    let payload = data("""
+    {
+      "id": 2,
+      "result": {
+        "rateLimits": {
+          "primary": {"usedPercent": 17, "windowDurationMins": 300, "resetsAt": 1799000000},
+          "secondary": null
+        }
+      }
+    }
+    """)
+
+    let usage = UsageNormalizer.codexAppServerRateLimits(from: payload, parsedAt: parsedAt)
+
+    #expect(usage.state == .unavailable)
+    #expect(usage.fiveHourPct == nil)
+    #expect(usage.weeklyPct == nil)
+}
+
 @Test("Codex JSONL maps reordered primary and secondary windows by descriptor")
 func codexJSONLMapsReorderedWindowsByDescriptor() {
     let payload = data("""

@@ -40,9 +40,9 @@ func thresholdColor(_ pct: Double) -> Color {
 }
 
 func labelSegments(claude: Usage, codex: Usage, compact: Bool) -> [MenuBarLabelSegment] {
-    providerSegments(symbol: "✳", usage: claude, compact: compact)
+    providerSegments(usage: claude, compact: compact)
         + [MenuBarLabelSegment(text: compact ? " " : "  ", color: .primary)]
-        + providerSegments(symbol: "⬡", usage: codex, compact: compact)
+        + providerSegments(usage: codex, compact: compact)
 }
 
 private func composedLabelText(_ segments: [MenuBarLabelSegment]) -> Text {
@@ -51,59 +51,62 @@ private func composedLabelText(_ segments: [MenuBarLabelSegment]) -> Text {
     }
 }
 
-private func providerSegments(symbol: String, usage: Usage, compact: Bool) -> [MenuBarLabelSegment] {
+private func providerSegments(usage: Usage, compact: Bool) -> [MenuBarLabelSegment] {
+    let displayedPercentages = displayedPercentages(for: usage, compact: compact)
     var segments = [
-        MenuBarLabelSegment(text: "\(symbol) ", color: .primary)
+        MenuBarLabelSegment(text: "\(usage.provider.menuBarSymbol) ", color: .primary)
     ]
 
     switch usage.state {
     case .ok:
-        segments.append(contentsOf: valueSegments(usage: usage, colorOverride: nil, compact: compact))
+        segments.append(contentsOf: valueSegments(displayedPercentages, colorOverride: nil))
     case .stale:
-        segments.append(contentsOf: valueSegments(usage: usage, colorOverride: .secondary, compact: compact))
+        segments.append(contentsOf: valueSegments(displayedPercentages, colorOverride: .secondary))
     case .refreshRequired:
-        if usage.fiveHourPct != nil || usage.weeklyPct != nil {
-            segments.append(contentsOf: valueSegments(usage: usage, colorOverride: .secondary, compact: compact))
+        if displayedPercentages.contains(where: { $0 != nil }) {
+            segments.append(contentsOf: valueSegments(displayedPercentages, colorOverride: .secondary))
         } else {
             segments.append(MenuBarLabelSegment(text: "↻", color: Color(.systemOrange)))
         }
     case .unauthorized:
         segments.append(MenuBarLabelSegment(text: "!", color: Color(.systemOrange)))
     case .unavailable:
-        segments.append(contentsOf: unavailableSegments(compact: compact))
+        segments.append(contentsOf: unavailableSegments(windowCount: displayedPercentages.count))
     }
 
     return segments
+}
+
+private func displayedPercentages(for usage: Usage, compact: Bool) -> [Double?] {
+    let percentages: [Double?]
+
+    switch usage.provider {
+    case .claude:
+        percentages = [usage.fiveHourPct, usage.weeklyPct]
+    case .codex:
+        percentages = [usage.weeklyPct]
+    }
+
+    return compact ? Array(percentages.prefix(1)) : percentages
 }
 
 private func valueSegments(
-    usage: Usage,
-    colorOverride: Color?,
-    compact: Bool
+    _ percentages: [Double?],
+    colorOverride: Color?
 ) -> [MenuBarLabelSegment] {
-    var segments = [percentageSegment(usage.fiveHourPct, colorOverride: colorOverride)]
+    percentages.enumerated().flatMap { index, percentage in
+        let value = percentageSegment(percentage, colorOverride: colorOverride)
 
-    guard !compact else {
-        return segments
+        guard index > 0 else {
+            return [value]
+        }
+
+        return [MenuBarLabelSegment(text: "·", color: .primary), value]
     }
-
-    segments.append(MenuBarLabelSegment(text: "·", color: .primary))
-    segments.append(percentageSegment(usage.weeklyPct, colorOverride: colorOverride))
-    return segments
 }
 
-private func unavailableSegments(compact: Bool) -> [MenuBarLabelSegment] {
-    var segments = [
-        MenuBarLabelSegment(text: "--", color: .secondary)
-    ]
-
-    guard !compact else {
-        return segments
-    }
-
-    segments.append(MenuBarLabelSegment(text: "·", color: .primary))
-    segments.append(MenuBarLabelSegment(text: "--", color: .secondary))
-    return segments
+private func unavailableSegments(windowCount: Int) -> [MenuBarLabelSegment] {
+    valueSegments(Array(repeating: nil, count: windowCount), colorOverride: .secondary)
 }
 
 private func percentageSegment(_ pct: Double?, colorOverride: Color?) -> MenuBarLabelSegment {
@@ -125,4 +128,15 @@ private func formattedPercentage(_ pct: Double) -> String {
     }
 
     return String(format: "%2d", roundedPct)
+}
+
+private extension Provider {
+    var menuBarSymbol: String {
+        switch self {
+        case .claude:
+            "✳"
+        case .codex:
+            "⬡"
+        }
+    }
 }

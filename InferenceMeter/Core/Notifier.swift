@@ -96,7 +96,7 @@ private extension Notifier {
             return
         }
 
-        for window in NotificationWindow.allCases {
+        for window in NotificationWindow.windows(for: usage.provider) {
             guard let percentage = window.percentage(in: usage) else {
                 continue
             }
@@ -242,6 +242,15 @@ private enum NotificationWindow: CaseIterable, Hashable {
     case fiveHour
     case weekly
     case fable
+
+    static func windows(for provider: Provider) -> [NotificationWindow] {
+        switch provider {
+        case .claude:
+            allCases
+        case .codex:
+            [.weekly]
+        }
+    }
 
     var label: String {
         switch self {
