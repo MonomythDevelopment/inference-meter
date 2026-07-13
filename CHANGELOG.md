@@ -8,6 +8,10 @@ All notable changes to InferenceMeter are documented here. The project follows [
 
 Codex compatibility release following the upstream removal of its five-hour usage window.
 
+### Added
+
+- Add a native macOS About panel with Monomyth Development, project, and license details.
+
 ### Fixed
 
 - Prefer Codex's live CLI rate-limit snapshot and ignore expired legacy windows left in rollout files after an upstream quota change.

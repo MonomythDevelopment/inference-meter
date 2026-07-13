@@ -46,6 +46,50 @@ func relativeUpdatedString(from updatedAt: Date, now: Date) -> String {
     }
 }
 
+struct AboutPanelDetails: Equatable {
+    let organizationName: String
+    let websiteURL: URL
+    let repositoryURL: URL
+    let licenseURL: URL
+
+    static let inferenceMeter = AboutPanelDetails(
+        organizationName: "Monomyth Development",
+        websiteURL: URL(string: "https://monomyth.dev")!,
+        repositoryURL: URL(string: "https://github.com/MonomythDevelopment/inference-meter")!,
+        licenseURL: URL(string: "https://github.com/MonomythDevelopment/inference-meter/blob/main/LICENSE")!
+    )
+}
+
+func makeAboutPanelCredits(details: AboutPanelDetails) -> NSAttributedString {
+    let credits = NSMutableAttributedString(
+        string: "Built by \(details.organizationName)\n"
+    )
+    credits.append(aboutPanelLink(title: "monomyth.dev", url: details.websiteURL))
+    credits.append(NSAttributedString(string: "\n"))
+    credits.append(aboutPanelLink(title: "Source code on GitHub", url: details.repositoryURL))
+    credits.append(NSAttributedString(string: "\n"))
+    credits.append(aboutPanelLink(title: "Released under the MIT License", url: details.licenseURL))
+    return credits
+}
+
+@MainActor
+func presentInferenceMeterAboutPanel() {
+    let details = AboutPanelDetails.inferenceMeter
+    NSApplication.shared.orderFrontStandardAboutPanel(
+        options: [
+            .credits: makeAboutPanelCredits(details: details)
+        ]
+    )
+    NSApplication.shared.activate(ignoringOtherApps: true)
+}
+
+private func aboutPanelLink(title: String, url: URL) -> NSAttributedString {
+    NSAttributedString(
+        string: title,
+        attributes: [.link: url]
+    )
+}
+
 struct DetailPopover: View {
     @Environment(AppState.self) private var appState
     @AppStorage("compactLabel") private var isCompactLabel = false
@@ -116,6 +160,10 @@ struct DetailPopover: View {
             )
 
             launchAtLoginMessage
+
+            Divider()
+
+            Button("About Inference Meter", action: presentInferenceMeterAboutPanel)
 
             Button("Quit Inference Meter", role: .destructive, action: handleQuit)
                 .keyboardShortcut("q")
