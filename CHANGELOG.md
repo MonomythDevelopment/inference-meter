@@ -4,6 +4,10 @@ All notable changes to InferenceMeter are documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-13
+
+Codex compatibility release following the upstream removal of its five-hour usage window.
+
 ### Fixed
 
 - Prefer Codex's live CLI rate-limit snapshot and ignore expired legacy windows left in rollout files after an upstream quota change.
@@ -38,5 +42,6 @@ First public source release. A signed and notarized app archive will be added wh
 
 - Adopt the Monomyth Development bundle identifier `dev.monomyth.InferenceMeter` for public releases. Users of pre-public builds must re-enable Launch at Login.
 
-[Unreleased]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MonomythDevelopment/inference-meter/releases/tag/v0.1.2
