@@ -53,7 +53,8 @@ func codexProviderFallsBackWhenCLIInterfaceIsUnavailable() async throws {
         )
         let provider = CodexProvider(
             homeDirectory: home,
-            appServerClient: CodexAppServerClient { nil }
+            appServerClient: CodexAppServerClient { nil },
+            now: { beforeFixtureResets }
         )
 
         let usage = await provider.refresh()
@@ -107,7 +108,7 @@ func codexProviderMapsShuffledWindowsByMinutes() async throws {
             contents: try fixtureString(named: "codex-rollout-shuffled-windows.jsonl")
         )
 
-        let usage = await CodexProvider(homeDirectory: home).refresh()
+        let usage = await CodexProvider(homeDirectory: home, now: { beforeFixtureResets }).refresh()
 
         #expect(usage.state == .ok)
         #expect(usage.source == .localFile)
@@ -127,7 +128,7 @@ func codexProviderTailScanSelectsLastRateLimitEvent() async throws {
             contents: try fixtureString(named: "codex-rollout-multi-event.jsonl")
         )
 
-        let usage = await CodexProvider(homeDirectory: home).refresh()
+        let usage = await CodexProvider(homeDirectory: home, now: { beforeFixtureResets }).refresh()
 
         #expect(usage.state == .ok)
         #expect(isClose(usage.fiveHourPct, to: 33))
@@ -148,7 +149,7 @@ func codexProviderMergesSparseRateLimitUpdatesByWindowDuration() async throws {
             """
         )
 
-        let usage = await CodexProvider(homeDirectory: home).refresh()
+        let usage = await CodexProvider(homeDirectory: home, now: { beforeFixtureResets }).refresh()
 
         #expect(usage.state == .ok)
         #expect(isClose(usage.fiveHourPct, to: 3))
@@ -179,7 +180,7 @@ func codexProviderMergesCurrentWindowsAcrossRecentRolloutFiles() async throws {
             modificationDate: isoDate("2026-07-12T19:55:32Z")
         )
 
-        let usage = await CodexProvider(homeDirectory: home).refresh()
+        let usage = await CodexProvider(homeDirectory: home, now: { beforeFixtureResets }).refresh()
 
         #expect(usage.state == .ok)
         #expect(isClose(usage.fiveHourPct, to: 3))
@@ -217,7 +218,7 @@ func codexProviderParsesNestedRateLimitPayload() async throws {
             """
         )
 
-        let usage = await CodexProvider(homeDirectory: home).refresh()
+        let usage = await CodexProvider(homeDirectory: home, now: { beforeFixtureResets }).refresh()
 
         #expect(usage.state == .ok)
         #expect(isClose(usage.fiveHourPct, to: 17))
@@ -278,7 +279,7 @@ func codexProviderWalksNewestSessionDirectoryWithoutGlobalFileSort() async throw
             modificationDate: Date(timeIntervalSince1970: 1_800_000_200)
         )
 
-        let usage = await CodexProvider(homeDirectory: home).refresh()
+        let usage = await CodexProvider(homeDirectory: home, now: { beforeFixtureResets }).refresh()
 
         #expect(usage.state == .ok)
         #expect(isClose(usage.fiveHourPct, to: 55))
@@ -300,7 +301,7 @@ func codexProviderReadsLargeRolloutTail() async throws {
 
         try writeRollout(home: home, contents: contents)
 
-        let usage = await CodexProvider(homeDirectory: home).refresh()
+        let usage = await CodexProvider(homeDirectory: home, now: { beforeFixtureResets }).refresh()
 
         #expect(usage.state == .ok)
         #expect(isClose(usage.fiveHourPct, to: 61))
@@ -507,6 +508,9 @@ func codexProviderUnauthorizedEndpointDoesNotFallBackToLocalUsage() async throws
         #expect(usage.source == .endpoint)
     }
 }
+
+// Earlier than every reset time in the rollout data these tests write and read.
+private let beforeFixtureResets = Date(timeIntervalSince1970: 1_782_000_000)
 
 private final class CodexProviderFixtureBundleMarker {}
 

@@ -138,6 +138,21 @@ func codexFiveHourValuesPostThresholdNotifications() async {
 }
 
 @MainActor
+@Test("An absent five-hour window posts no five-hour notification for either provider")
+func absentFiveHourWindowPostsNoFiveHourNotification() async {
+    let fixture = NotifierFixture()
+
+    await fixture.notifier.evaluate(
+        state: fixture.state(claudeWeeklyPct: 81, codexWeeklyPct: 81)
+    )
+
+    #expect(fixture.poster.notifications.map(\.identifier) == [
+        "inference-meter.threshold.claude.weekly.80",
+        "inference-meter.threshold.codex.weekly.80"
+    ])
+}
+
+@MainActor
 @Test("Fable notification copy uses scoped model label")
 func fableNotificationCopyUsesScopedModelLabel() async {
     let fixture = NotifierFixture()

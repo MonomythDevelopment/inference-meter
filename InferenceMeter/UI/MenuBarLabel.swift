@@ -78,14 +78,9 @@ private func providerSegments(usage: Usage, compact: Bool) -> [MenuBarLabelSegme
 }
 
 private func displayedPercentages(for usage: Usage, compact: Bool) -> [Double?] {
-    let percentages: [Double?]
-
-    switch usage.provider {
-    case .claude:
-        percentages = [usage.fiveHourPct, usage.weeklyPct]
-    case .codex:
-        percentages = [usage.fiveHourPct, usage.weeklyPct]
-    }
+    let percentages = usage.reportsFiveHourWindow
+        ? [usage.fiveHourPct, usage.weeklyPct]
+        : [usage.weeklyPct]
 
     return compact ? Array(percentages.prefix(1)) : percentages
 }

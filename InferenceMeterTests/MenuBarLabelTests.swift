@@ -129,42 +129,62 @@ func unavailableProvidersRenderDashesInsteadOfZeroValues() {
         compact: true
     )
 
-    #expect(segmentText(fullSegments) == "✳ --·--  ⬡  0·70")
+    #expect(segmentText(fullSegments) == "✳ --  ⬡  0·70")
     #expect(fullSegments[1].color == .secondary)
-    #expect(fullSegments[3].color == .secondary)
+    #expect(fullSegments[4].color == Color(.systemGreen))
     #expect(fullSegments[6].color == Color(.systemGreen))
-    #expect(fullSegments[8].color == Color(.systemGreen))
 
     #expect(segmentText(compactSegments) == "✳ -- ⬡  0")
     #expect(compactSegments[1].color == .secondary)
     #expect(compactSegments[4].color == Color(.systemGreen))
 }
 
-@Test("Nil values render as dashes and single digits use a stable two-character slot")
-func nilValuesRenderAsDashesAndSingleDigitsUseStableSlot() {
+@Test("A reported five-hour window without a weekly value keeps the weekly dash")
+func reportedFiveHourWindowWithoutWeeklyValueKeepsWeeklyDash() {
     let segments = labelSegments(
         claude: usage(provider: .claude, fiveHourPct: 9.4, weeklyPct: nil),
-        codex: usage(provider: .codex, fiveHourPct: nil, weeklyPct: 10.4),
-        compact: false
-    )
-
-    #expect(segmentText(segments) == "✳  9·--  ⬡ --·10")
-    #expect(segments[1] == MenuBarLabelSegment(text: " 9", color: Color(.systemGreen)))
-    #expect(segments[3] == MenuBarLabelSegment(text: "--", color: .secondary))
-    #expect(segments[6] == MenuBarLabelSegment(text: "--", color: .secondary))
-    #expect(segments[8] == MenuBarLabelSegment(text: "10", color: Color(.systemGreen)))
-}
-
-@Test("Codex renders an available five-hour value when weekly usage is absent")
-func codexRendersFiveHourValueWhenWeeklyUsageIsAbsent() {
-    let segments = labelSegments(
-        claude: usage(provider: .claude, fiveHourPct: 45, weeklyPct: 70),
         codex: usage(provider: .codex, fiveHourPct: 99, weeklyPct: nil),
         compact: false
     )
 
-    #expect(segmentText(segments) == "✳ 45·70  ⬡ 99·--")
+    #expect(segmentText(segments) == "✳  9·--  ⬡ 99·--")
+    #expect(segments[1] == MenuBarLabelSegment(text: " 9", color: Color(.systemGreen)))
+    #expect(segments[3] == MenuBarLabelSegment(text: "--", color: .secondary))
     #expect(segments.last == MenuBarLabelSegment(text: "--", color: .secondary))
+}
+
+@Test("An absent five-hour window leaves only the weekly value in both label modes")
+func absentFiveHourWindowLeavesOnlyWeeklyValueInBothLabelModes() {
+    let claude = usage(provider: .claude, fiveHourPct: nil, weeklyPct: 70)
+    let codex = usage(provider: .codex, fiveHourPct: nil, weeklyPct: 10.4)
+
+    let fullSegments = labelSegments(claude: claude, codex: codex, compact: false)
+    let compactSegments = labelSegments(claude: claude, codex: codex, compact: true)
+
+    #expect(segmentText(fullSegments) == "✳ 70  ⬡ 10")
+    #expect(fullSegments[1] == MenuBarLabelSegment(text: "70", color: Color(.systemOrange)))
+    #expect(fullSegments.last == MenuBarLabelSegment(text: "10", color: Color(.systemGreen)))
+    #expect(segmentText(compactSegments) == "✳ 70 ⬡ 10")
+}
+
+@Test("An absent five-hour window stays out of the label in every state")
+func absentFiveHourWindowStaysOutOfLabelInEveryState() {
+    let cases: [(UsageState, String)] = [
+        (.stale, "✳ 70  ⬡ 40"),
+        (.refreshRequired, "✳ 70  ⬡ 40"),
+        (.unauthorized, "✳ !  ⬡ 40"),
+        (.unavailable, "✳ --  ⬡ 40")
+    ]
+
+    for (state, expectedText) in cases {
+        let segments = labelSegments(
+            claude: usage(provider: .claude, fiveHourPct: nil, weeklyPct: 70, state: state),
+            codex: usage(provider: .codex, fiveHourPct: nil, weeklyPct: 40),
+            compact: false
+        )
+
+        #expect(segmentText(segments) == expectedText)
+    }
 }
 
 private func segmentText(_ segments: [MenuBarLabelSegment]) -> String {
