@@ -188,7 +188,7 @@ Finally, extract the ZIP on a clean macOS account or separate Mac and verify tha
 
 - Gatekeeper opens the app without an unsigned-developer workaround.
 - The app displays the expected version in **About Inference Meter**.
-- Claude Keychain access is requested only when needed.
+- Claude usage loads without any Keychain password prompt.
 - Codex usage works without exposing or copying CLI credentials.
 - Launch at Login can be enabled and survives a restart.
 

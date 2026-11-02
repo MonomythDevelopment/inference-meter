@@ -44,6 +44,8 @@ The engine polls every 60 seconds. Claude endpoint attempts are limited to every
 
 The CLIs own their OAuth credentials. InferenceMeter is strictly read-only: it must never perform a refresh-token exchange or write the Keychain credential or `~/.codex/auth.json`. Refresh tokens rotate, so using one independently can invalidate the CLI's copy and force a login.
 
+Read the Claude credential only through `/usr/bin/security` (`Core/Keychain.swift`), never `SecItemCopyMatching`. Claude Code writes the item with that tool, so its partition list is just `apple-tool:`; a direct read makes `securityd` log `ACL partition mismatch` and ask for the login password even when the app is already on the access list, and **Always Allow** does not stop it.
+
 Claude reauthentication may invoke `claude auth status --json` with all output discarded. This only asks the owner CLI to inspect or renew its own state; the provider then adopts a newer access token if the Keychain credential changed. Codex only adopts CLI-written state.
 
 Never print tokens, credentials, authorization headers, or raw owner payloads. Secret-safety tests capture stdout and stderr at the file-descriptor level; keep them green. Fixtures and issue attachments must be sanitized.

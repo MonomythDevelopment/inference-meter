@@ -4,6 +4,10 @@ All notable changes to InferenceMeter are documented here. The project follows [
 
 ## [Unreleased]
 
+### Fixed
+
+- Stop the repeated macOS Keychain password prompts for `Claude Code-credentials`. The app now reads the credential through `/usr/bin/security`, as Claude Code does, instead of requesting direct access that **Always Allow** could not satisfy.
+
 ## [0.1.4] - 2026-07-13
 
 Codex quota-window restoration release after its five-hour limit proved to be temporarily absent rather than retired.
