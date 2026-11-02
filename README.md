@@ -60,7 +60,7 @@ The app never sends a refresh-token request and never writes OAuth credentials. 
 
 Tokens, credentials, and authorization headers are not logged. The app contains no analytics, advertising, or update tracker. Claude network requests go directly to its provider endpoint. Codex network requests are delegated to the installed CLI so Codex remains the sole owner of its authentication lifecycle.
 
-The first Claude refresh may trigger a macOS Keychain permission prompt. Choose **Always Allow** if you want future usage refreshes to occur without another prompt.
+InferenceMeter reads the Claude credential through Apple's `/usr/bin/security` tool, the same way Claude Code reads it, so macOS does not show a Keychain password prompt. Claude Code's item already trusts that tool, which means any process running as your user can read the credential this way, with or without InferenceMeter installed. If you previously chose **Always Allow**, the leftover InferenceMeter entries on the item are harmless and no longer used.
 
 ## Data freshness and limitations
 

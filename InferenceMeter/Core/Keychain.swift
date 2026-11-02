@@ -20,7 +20,7 @@ struct Keychain: Sendable {
     private let readGenericPasswordHandler: @Sendable (_ service: String, _ account: String) throws -> Data
 
     init(
-        readGenericPassword: @escaping @Sendable (_ service: String, _ account: String) throws -> Data = Keychain.secItemReadGenericPassword
+        readGenericPassword: @escaping @Sendable (_ service: String, _ account: String) throws -> Data = Keychain.securityToolReadGenericPassword
     ) {
         readGenericPasswordHandler = readGenericPassword
     }
@@ -31,26 +31,49 @@ struct Keychain: Sendable {
 }
 
 private extension Keychain {
-    static func secItemReadGenericPassword(service: String, account: String) throws -> Data {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: account,
-            kSecReturnData: kCFBooleanTrue as Any,
-            kSecMatchLimit: kSecMatchLimitOne
-        ]
+    static let securityToolURL = URL(fileURLWithPath: "/usr/bin/security")
+    static let securityToolTimeout = DispatchTimeInterval.seconds(5)
+    // The tool exits with the low byte of its OSStatus; 44 is errSecItemNotFound.
+    static let securityToolItemNotFoundExitStatus: Int32 = 44
 
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+    // Claude Code writes and reads its credential through /usr/bin/security, so that tool is
+    // always trusted on the item and the partition list holds only "apple-tool:". Reading with
+    // SecItemCopyMatching fails that partition check, and macOS asks for the login password
+    // however many times "Always Allow" was chosen. Reading the same way the owner does never
+    // prompts. The credential travels over a pipe; only the service and account are arguments.
+    static func securityToolReadGenericPassword(service: String, account: String) throws -> Data {
+        let process = Process()
+        let standardOutput = Pipe()
+        process.executableURL = securityToolURL
+        process.arguments = ["find-generic-password", "-a", account, "-w", "-s", service]
+        process.standardOutput = standardOutput
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
 
-        guard status == errSecSuccess else {
-            throw KeychainError(status: status)
+        try process.run()
+
+        let processIdentifier = process.processIdentifier
+        // SIGKILL because a child ignoring SIGTERM would keep the pipe open and block the read.
+        let timeout = DispatchWorkItem { kill(processIdentifier, SIGKILL) }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + securityToolTimeout, execute: timeout)
+        defer { timeout.cancel() }
+
+        let output = try standardOutput.fileHandleForReading.readToEnd() ?? Data()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw process.terminationStatus == securityToolItemNotFoundExitStatus
+                ? KeychainError.itemNotFound
+                : KeychainError.unhandled(process.terminationStatus)
         }
 
-        guard let data = result as? Data else {
+        // The tool terminates the password with a newline that is not part of the item.
+        let data = output.last == UInt8(ascii: "\n") ? output.dropLast() : output[...]
+
+        guard !data.isEmpty else {
             throw KeychainError.unexpectedItemData
         }
 
-        return data
+        return Data(data)
     }
 }
