@@ -53,7 +53,8 @@ private extension Keychain {
         try process.run()
 
         let processIdentifier = process.processIdentifier
-        let timeout = DispatchWorkItem { kill(processIdentifier, SIGTERM) }
+        // SIGKILL because a child ignoring SIGTERM would keep the pipe open and block the read.
+        let timeout = DispatchWorkItem { kill(processIdentifier, SIGKILL) }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + securityToolTimeout, execute: timeout)
         defer { timeout.cancel() }
 
