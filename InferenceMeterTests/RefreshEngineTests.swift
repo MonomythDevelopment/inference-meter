@@ -170,6 +170,56 @@ func claudeRefreshAttemptsStayThrottledWhenBackoffIsBypassed() async {
 }
 
 @MainActor
+@Test("A five-hour window leaves and returns with successful refreshes", arguments: [Provider.claude, .codex])
+func fiveHourWindowLeavesAndReturnsWithSuccessfulRefreshes(provider: Provider) async {
+    let clock = TestRefreshClock()
+    let usageProvider = ScriptedUsageProvider(
+        provider: provider,
+        responses: [
+            usage(provider: provider, fiveHourPct: 45, weeklyPct: 70, updatedAt: clock.now),
+            usage(provider: provider, fiveHourPct: nil, weeklyPct: 71, updatedAt: clock.now),
+            usage(provider: provider, fiveHourPct: 12, weeklyPct: 72, updatedAt: clock.now)
+        ]
+    )
+    let appState = AppState()
+    let engine = RefreshEngine(
+        appState: appState,
+        providers: [usageProvider],
+        clock: clock,
+        configuration: testConfiguration()
+    )
+    let refreshAfterThrottle = {
+        // Claude's endpoint attempts are limited to one every five minutes.
+        clock.advance(by: 300)
+        await engine.refresh(provider: provider, bypassingBackoff: true)
+    }
+    let labelText = {
+        labelSegments(
+            claude: provider == .claude ? appState.claude : .unavailable(provider: .claude),
+            codex: provider == .codex ? appState.codex : .unavailable(provider: .codex),
+            compact: false
+        )
+        .map(\.text)
+        .joined()
+    }
+    let symbol = provider == .claude ? "✳" : "⬡"
+
+    await refreshAfterThrottle()
+    #expect(appState.usage(for: provider).fiveHourPct == 45)
+    #expect(labelText().contains("\(symbol) 45·70"))
+
+    await refreshAfterThrottle()
+    #expect(appState.usage(for: provider).fiveHourPct == nil)
+    #expect(appState.usage(for: provider).weeklyPct == 71)
+    #expect(labelText().contains("\(symbol) 71"))
+    #expect(!labelText().contains("\(symbol) 71·"))
+
+    await refreshAfterThrottle()
+    #expect(appState.usage(for: provider).fiveHourPct == 12)
+    #expect(labelText().contains("\(symbol) 12·72"))
+}
+
+@MainActor
 @Test("Failed refresh keeps the last known usage values")
 func failedRefreshKeepsLastKnownUsageValues() async {
     let start = Date(timeIntervalSince1970: 1_800_000_000)

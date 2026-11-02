@@ -19,6 +19,7 @@ struct CodexProvider: UsageProvider {
     private let authFileReader: FileReader
     private let tokenStore: TokenStore
     private let appServerClient: CodexAppServerClient?
+    private let now: @Sendable () -> Date
 
     init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -26,7 +27,8 @@ struct CodexProvider: UsageProvider {
         session: URLSession = .shared,
         authFileReader: FileReader = FileReader(),
         tokenStore: TokenStore = TokenStore(),
-        appServerClient: CodexAppServerClient? = nil
+        appServerClient: CodexAppServerClient? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.homeDirectory = homeDirectory
         self.endpointConfiguration = endpointConfiguration
@@ -36,6 +38,7 @@ struct CodexProvider: UsageProvider {
         self.appServerClient = appServerClient ?? Self.defaultAppServerClient(
             homeDirectory: homeDirectory
         )
+        self.now = now
     }
 
     func refresh() async -> Usage {
@@ -135,7 +138,28 @@ private extension CodexProvider {
             }
         }
 
-        return accumulator.usage ?? unavailableUsage(source: .localFile)
+        guard let usage = accumulator.usage else {
+            return unavailableUsage(source: .localFile)
+        }
+
+        return withoutElapsedFiveHourWindow(usage)
+    }
+
+    /// The scan judges a window against when its event was written. A snapshot can outlive
+    /// that window, and it must not bring back a five-hour window that has since reset.
+    func withoutElapsedFiveHourWindow(_ usage: Usage) -> Usage {
+        guard let resetsAt = usage.fiveHourResetsAt, resetsAt <= now() else {
+            return usage
+        }
+
+        guard usage.weeklyPct != nil else {
+            return unavailableUsage(source: .localFile)
+        }
+
+        var currentUsage = usage
+        currentUsage.fiveHourPct = nil
+        currentUsage.fiveHourResetsAt = nil
+        return currentUsage
     }
 
     func recentRolloutFiles(limit: Int = Self.maxRecentRolloutFiles) throws -> [URL] {

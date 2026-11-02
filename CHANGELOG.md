@@ -4,8 +4,13 @@ All notable changes to InferenceMeter are documented here. The project follows [
 
 ## [Unreleased]
 
+### Changed
+
+- Show the five-hour window for Claude and Codex only when the provider reports it. Accounts without one no longer see `--` in the menu bar label or a "5-hour Unavailable" row, and the compact label shows the weekly value instead. The window returns on the next refresh if the provider reports it again.
+
 ### Fixed
 
+- Stop a Codex session file from reviving a five-hour value whose window has since reset when the CLI cannot report current limits.
 - Stop the repeated macOS Keychain password prompts for `Claude Code-credentials`. The app now reads the credential through `/usr/bin/security`, as Claude Code does, instead of requesting direct access that **Always Allow** could not satisfy.
 
 ## [0.1.4] - 2026-07-13

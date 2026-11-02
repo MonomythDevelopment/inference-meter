@@ -276,29 +276,11 @@ private struct ProviderUsageSection: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                if configuration.showsFiveHourUsage {
+                ForEach(configuration.displayedWindows(for: usage), id: \.title) { window in
                     UsageWindowRow(
-                        title: "5-hour",
-                        percentage: usage.fiveHourPct,
-                        resetsAt: usage.fiveHourResetsAt,
-                        state: usage.state,
-                        now: now
-                    )
-                }
-
-                UsageWindowRow(
-                    title: "Weekly",
-                    percentage: usage.weeklyPct,
-                    resetsAt: usage.weeklyResetsAt,
-                    state: usage.state,
-                    now: now
-                )
-
-                if configuration.showsFableUsage {
-                    UsageWindowRow(
-                        title: "Fable",
-                        percentage: usage.fablePct,
-                        resetsAt: usage.fableResetsAt,
+                        title: window.title,
+                        percentage: window.percentage,
+                        resetsAt: window.resetsAt,
                         state: usage.state,
                         now: now
                     )
@@ -477,18 +459,22 @@ private struct StatusBadge: View {
     }
 }
 
-private struct ProviderDisplayConfiguration {
+struct DisplayedUsageWindow: Equatable {
+    let title: String
+    let percentage: Double?
+    let resetsAt: Date?
+}
+
+struct ProviderDisplayConfiguration {
     let glyph: String
     let name: String
     let signInName: String
-    let showsFiveHourUsage: Bool
     let showsFableUsage: Bool
 
     static let claude = ProviderDisplayConfiguration(
         glyph: "✳",
         name: "Claude Code",
         signInName: "Claude Code",
-        showsFiveHourUsage: true,
         showsFableUsage: true
     )
 
@@ -496,7 +482,39 @@ private struct ProviderDisplayConfiguration {
         glyph: "⬡",
         name: "Codex",
         signInName: "Codex",
-        showsFiveHourUsage: true,
         showsFableUsage: false
     )
+
+    func displayedWindows(for usage: Usage) -> [DisplayedUsageWindow] {
+        var windows = [
+            DisplayedUsageWindow(
+                title: "Weekly",
+                percentage: usage.weeklyPct,
+                resetsAt: usage.weeklyResetsAt
+            )
+        ]
+
+        if usage.reportsFiveHourWindow {
+            windows.insert(
+                DisplayedUsageWindow(
+                    title: "5-hour",
+                    percentage: usage.fiveHourPct,
+                    resetsAt: usage.fiveHourResetsAt
+                ),
+                at: 0
+            )
+        }
+
+        if showsFableUsage {
+            windows.append(
+                DisplayedUsageWindow(
+                    title: "Fable",
+                    percentage: usage.fablePct,
+                    resetsAt: usage.fableResetsAt
+                )
+            )
+        }
+
+        return windows
+    }
 }

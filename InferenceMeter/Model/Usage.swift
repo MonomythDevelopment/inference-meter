@@ -33,6 +33,13 @@ struct Usage: Sendable, Equatable {
 }
 
 extension Usage {
+    /// The single rule for showing a five-hour window, for every provider: the current
+    /// data has a value for it. Plans do not predict this, and an idle window is still
+    /// reported at 0%, so an absent value means the window does not apply right now.
+    var reportsFiveHourWindow: Bool {
+        fiveHourPct != nil
+    }
+
     static func unavailable(
         provider: Provider,
         source: UsageSource = .localFile,
