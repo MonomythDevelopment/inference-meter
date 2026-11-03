@@ -4,6 +4,10 @@ All notable changes to InferenceMeter are documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-02
+
+Five-hour windows now follow what each provider reports, and the repeated Keychain password prompts are gone.
+
 ### Changed
 
 - Show the five-hour window for Claude and Codex only when the provider reports it. Accounts without one no longer see `--` in the menu bar label or a "5-hour Unavailable" row, and the compact label shows the weekly value instead. The window returns on the next refresh if the provider reports it again.
@@ -65,7 +69,8 @@ First public source release. A signed and notarized app archive will be added wh
 
 - Adopt the Monomyth Development bundle identifier `dev.monomyth.InferenceMeter` for public releases. Users of pre-public builds must re-enable Launch at Login.
 
-[Unreleased]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/MonomythDevelopment/inference-meter/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MonomythDevelopment/inference-meter/releases/tag/v0.1.2
